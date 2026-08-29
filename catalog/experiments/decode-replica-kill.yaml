@@ -1,0 +1,21 @@
+name: decode-replica-kill
+layer: inference-graph
+wanted_fault: decode-role death in disaggregated serving
+injection:
+  tool: Chaos Mesh
+  technique: pod-kill
+  detail: "PodChaos pod-kill, mode one, labelSelector role=decode, staging disaggregated deployment"
+blast_radius: one decode replica, staging namespace
+duration: 3m
+steady_state:
+  - "router stops sending to the dead replica (removed from routing)"
+  - "standby or rescale holds TTFT p99 inside SLO"
+  - "prefill GPUs do not strand (utilization floor holds)"
+abort: "TTFT p99 > 8s for 60s, or prefill utilization collapses"
+undo: "delete chaos resource; verify role ratio restored"
+owner: serving-oncall
+evidence: "metrics.json + router log + role-ratio timeline"
+hardware_required: true
+certifies: "role-level failover; the shadow/rescale path measured under kill, not assumed"
+autonomy_class: L2
+notes: "pod-failure (pause) is a different experiment: a frozen replica still in the endpoints."

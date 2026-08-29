@@ -1,0 +1,20 @@
+name: rank-kill-training
+layer: training-graph
+wanted_fault: rank death mid-collective (worker process gone)
+injection:
+  tool: kubectl / PodChaos
+  technique: process-kill
+  detail: "SIGKILL one worker rank of an 8-64 GPU staging training job (or PodChaos pod-kill on the worker pod)"
+blast_radius: one rank of one staging job
+duration: 30m
+steady_state:
+  - "job fails fast or shrinks elastically; no indefinite hang"
+  - "restart loads the last verified checkpoint (hash checked)"
+  - "loss curve resumes inside the pre-registered band; no NaN burst"
+abort: "job hangs past 2x the configured watchdog, or a second job is affected"
+undo: "delete chaos resource / restart job; verify checkpoint integrity"
+owner: ml-infra
+evidence: "metrics.json + NCCL logs + checkpoint hash log"
+hardware_required: true
+certifies: "checkpoint policy + fail-fast behavior (restart-from-hash L2 candidate)"
+autonomy_class: L2

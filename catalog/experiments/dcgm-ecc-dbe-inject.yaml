@@ -1,0 +1,25 @@
+name: dcgm-ecc-dbe-inject
+layer: accelerator
+wanted_fault: reported uncorrectable ECC error (DBE, XID 48 class)
+injection:
+  tool: dcgmi
+  technique: dcgm-inject
+  detail: "dcgmi test --inject --gpuid 0 -f 319 -v 4  # DCGM_FI_DEV_ECC_DBE_VOL_DEV; look field IDs up on the box under test"
+blast_radius: one GPU, one node, staging pool
+duration: 10m
+steady_state:
+  - "DCGM policy violation fires within 60 s of injection"
+  - "node is cordoned before the next gang admission"
+  - "wasted GPU-seconds for the event stay under budget B"
+abort: "policy does not fire in 5m, or cordon hits more than one node"
+undo: "clear injected field; uncordon; verify node rejoins the schedulable pool"
+owner: platform-oncall
+evidence: "metrics.json + DCGM policy log + scheduler admission log"
+hardware_required: true
+certifies: "detector -> cordon/drain loop on a reported hardware fault (L2 candidate)"
+autonomy_class: L2
+notes: >-
+  Injection is software-only; it does not harm the GPU. It certifies the
+  reaction to a REPORTED fault, not survival of a real one. A no-GPU variant
+  exists: NVSentinel's local fault-injection demo drives the same loop against
+  a fake DCGM inside a KIND cluster.

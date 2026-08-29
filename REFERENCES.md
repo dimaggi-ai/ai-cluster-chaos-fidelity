@@ -1,0 +1,34 @@
+# References
+
+Every factual claim in this standard traces to a source below. Items were verified against primary sources in August 2026; tooling versions and vendor field identifiers drift — the standard pins the versions it was verified against and tells you to re-check on the box under test. (Reliability-*economics* sources — failure-rate studies, ETTR, checkpointing systems — live in the companion reliability-economics repository, which is where those claims are made.)
+
+## Chaos-engineering tooling
+
+- **[1]** Chaos Mesh documentation (stable **v2.8.4**, 2026-08-18). PodChaos (pod-kill one-shot vs pod-failure/pause), NetworkChaos (delay/loss/duplicate/corrupt/partition/bandwidth/reorder/rate/netem, via tc/netem in the pod netns), IOChaos (actions latency/fault/attrOverride/mistake; errno, volumePath, percent; via toda), StressChaos, PhysicalMachineChaos + Chaosd (network-delay/loss/partition with a `device:` field), TimeChaos, DNSChaos, HTTPChaos. https://chaos-mesh.org/docs/
+- **[2]** LitmusChaos — Kubernetes chaos platform with ChaosHub experiment catalog and GitOps governance. https://litmuschaos.io/
+- **[3]** Kikuta, Ikeuchi, Tajiri (NTT), "ChaosEater: Fully Automating Chaos Engineering with Large Language Models," arXiv:2501.11107 (2025). LLM agentic workflow for the full CE cycle on Kubernetes. Follow-up: arXiv:2511.07865. https://arxiv.org/abs/2501.11107
+- **[4]** AWS Fault Injection Service (FIS) — managed fault injection for AWS workloads. https://aws.amazon.com/fis/ · Azure Chaos Studio. https://azure.microsoft.com/en-us/products/chaos-studio
+
+## Accelerator health, XIDs, and DCGM injection
+
+- **[5]** NVIDIA XID Errors documentation (r590). XID 13 Graphics Engine Exception (general user-application faults, incl. illegal access); 31 GPU memory page fault (MMU); 48 Double Bit ECC (uncorrectable); 63/64 GPU memory remapping event/failure; 79 GPU has fallen off the bus; 94 contained (RESTART_APP) / 95 uncontained (RESET_GPU) memory error. https://docs.nvidia.com/deploy/xid-errors/
+- **[6]** NVIDIA DCGM — Error Injection user guide. Documented examples verbatim: `dcgmi test --inject --gpuid 0 -f 319 -v 4` (ECC double-bit; field **319 = DCGM_FI_DEV_ECC_DBE_VOL_DEV**, per dcgm_fields.h — note DCGM_FI_DEV_ECC_DBE_VOL_TOTAL is 311); `dcgmi test --inject --gpuid 0 -f 202 -v 99999` (PCIe replay; **202 = DCGM_FI_DEV_PCIE_REPLAY_TOTAL**, with `DCGM_FI_DEV_PCIE_REPLAY_COUNTER` a legacy alias for the same field); `dcgmi policy --set 0,0 -e` + `dcgmi policy --reg`. Field IDs vary by DCGM version — look them up on the box under test. Note: injection makes DCGM *report* a fault; it does not create the physical fault. https://docs.nvidia.com/datacenter/dcgm/latest/user-guide/dcgm-error-injection.html · fields header: https://github.com/NVIDIA/DCGM/blob/master/dcgmlib/dcgm_fields.h
+- **[7]** NVIDIA DCGM diagnostics — `dcgmi diag -r pulse_test` (level-4 extended test that fluctuates power to create current spikes). Run levels 1 Quick / 2 Medium / 3 Long / 4 Extended. Commissioning-class; not random chaos on a live gang. https://docs.nvidia.com/datacenter/dcgm/latest/user-guide/dcgm-diagnostics.html
+- **[8]** NVIDIA NVSentinel — cross-platform GPU fault-remediation service for Kubernetes (DCGM + kernel/XID signals → cordon/drain/reset; monitor-only and closed-loop modes). Local Fault-Injection Demo: "simulates a fatal GPU hardware fault (corrupt InfoROM) using DCGM's error injection capability" against a fake DCGM in a KIND cluster (no GPU required). https://github.com/NVIDIA/NVSentinel · https://developer.nvidia.com/blog/automate-kubernetes-ai-cluster-health-with-nvsentinel/
+- **[9]** wilicc/gpu-burn — multi-GPU CUDA stress test (sustained matrix-multiply; `-tc` tensor cores). Device-level thermal/power load; lab use. https://github.com/wilicc/gpu-burn
+
+## Collectives and the two clocks
+
+- **[10]** PyTorch distributed docs — `init_process_group(timeout=…)`: "Default value is 10 minutes for NCCL and 30 minutes for other backends. This is the duration after which collectives will be aborted asynchronously and the process will crash." Source: `torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp` (`kProcessGroupNCCLDefaultTimeout = 10*60*1000 ms`). https://docs.pytorch.org/docs/stable/distributed.html
+- **[11]** NVIDIA NCCL environment variables — `NCCL_IB_TIMEOUT`: "The timeout is computed as 4.096 µs × 2^timeout." Default 20 since NCCL 2.23 (was 18 since 2.14, 14 before); `NCCL_IB_RETRY_CNT` default 7. At default 20 with 7 retries, the IB transport errors out in ~30–34 s — versus the 600 s PyTorch watchdog. Treat as (version, config) metadata, not a timeless constant. https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/env.html
+- **[12]** PyTorch team (Meta), "Flight Recorder: A New Lens for Understanding NCCL Watchdog Timeouts," PyTorch blog, March 2026. Meta fleet finding: "almost all NCCL watchdog timeout errors are caused by collective desync (i.e., mismatch), not collective slowness/hang"; CPU-side issues ">60% across all training frameworks." (A watchdog-conditional distribution, not an arrival rate.) https://pytorch.org/blog/flight-recorder-a-new-lens-for-understanding-nccl-watchdog-timeouts/
+
+## Orchestration and serving
+
+- **[13]** Kubernetes v1.34 — Dynamic Resource Allocation (DRA) graduated to **GA/stable** (Sep 2025): core `resource.k8s.io` APIs (ResourceClaim, DeviceClass, ResourceClaimTemplate, ResourceSlice) stable; supersedes the device-plugin model for structured GPU allocation. https://kubernetes.io/blog/2025/09/01/kubernetes-v1-34-dra-updates/
+- **[14]** Zhong et al., "DistServe: Disaggregating Prefill and Decoding for Goodput-optimized LLM Serving," OSDI '24, arXiv:2401.09670 (7.4× more requests / 12.6× tighter SLO). Patel et al., "Splitwise: Efficient Generative LLM Inference Using Phase Splitting," ISCA '24. https://www.usenix.org/conference/osdi24/presentation/zhong-yinmin
+- **[15]** NVIDIA Dynamo — disaggregated serving with router + fault tolerance. Docs: unhealthy workers "removed from routing" via canary health checks; on a broken stream a worker "is immediately removed from the set of active workers (for about five seconds)"; Shadow Engine Failover: a standby "attaches to the resident GMS-owned weights instead of performing a full weight reload" (no quantified recovery time is published — the standard does not assert one). https://docs.nvidia.com/dynamo/ · vLLM disaggregated prefilling (experimental): https://docs.vllm.ai/en/latest/features/disagg_prefill.html
+
+## Failure classes named as out-of-scope
+
+- **[16]** Silent data corruption at scale: Dixit et al. (Meta), "Silent Data Corruptions at Scale," arXiv:2102.11245; Hochschild et al. (Google), "Cores that don't count," HotOS 2021. Computational SDC — a device silently producing wrong results with no error signal — the failure class checksum-on-checkpoint cannot catch, and DCGM injection cannot certify. https://arxiv.org/abs/2102.11245

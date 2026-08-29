@@ -1,0 +1,23 @@
+name: ip-bootstrap-delay
+layer: overlay-network
+wanted_fault: degraded TCP bootstrap / rendezvous path (NCCL_SOCKET, not AllReduce)
+injection:
+  tool: Chaosd (PhysicalMachineChaos)
+  technique: chaosd-nic
+  detail: >-
+    tc/netem delay or loss on the host NIC's IP path used for out-of-band
+    rendezvous and control (NCCL_SOCKET_IFNAME), not the RDMA verbs path. This
+    is what Chaosd tc/netem actually reaches; label it honestly.
+blast_radius: one node's IP path, one staging job
+duration: 60s
+steady_state:
+  - "rank rendezvous/bootstrap tolerates the delay or retries cleanly"
+  - "the RDMA collective path is unaffected (verify AllReduce bandwidth holds)"
+abort: "the job wedges in bootstrap past 2 min"
+undo: "remove the tc/netem rule; verify baseline rendezvous latency"
+owner: ml-infra
+evidence: "bootstrap/rendezvous log + collective-bandwidth check"
+hardware_required: false
+agent_forbidden: true
+certifies: "the IP bootstrap/control path only — explicitly NOT the collective (that is ib-link-flap's job). The pair demonstrates the fidelity distinction."
+autonomy_class: L1

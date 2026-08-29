@@ -1,0 +1,19 @@
+name: rag-index-lag
+layer: data-artifacts
+wanted_fault: empty or lagged retrieval index behind a healthy endpoint
+injection:
+  tool: index management
+  technique: rag-degrade
+  detail: "point one replica's retrieval at an empty or stale index snapshot"
+blast_radius: one replica, staging namespace
+duration: 15m
+steady_state:
+  - "citation-fidelity canary detects the degradation within its window"
+  - "traffic shifts away from the degraded replica"
+abort: "canary silent for 10m"
+undo: "restore live index; verify canary green"
+owner: serving-oncall
+evidence: "canary eval results + retrieval hit-rate metrics"
+hardware_required: false
+certifies: "quality observability for retrieval-dependent serving"
+autonomy_class: L1

@@ -1,0 +1,19 @@
+name: dcgm-pcie-replay-inject
+layer: accelerator
+wanted_fault: PCIe replay-count excursion (link degradation signal)
+injection:
+  tool: dcgmi
+  technique: dcgm-inject
+  detail: "dcgmi test --inject --gpuid 0 -f 202 -v 99999  # DCGM_FI_DEV_PCIE_REPLAY_TOTAL"
+blast_radius: one GPU, one node, staging pool
+duration: 10m
+steady_state:
+  - "health watch flags the link within 60 s"
+  - "controller distinguishes link-degradation from device-failure (no RMA path triggered)"
+abort: "any remediation beyond flag/cordon fires"
+undo: "clear injected field; verify health returns to clean"
+owner: platform-oncall
+evidence: "metrics.json + DCGM health output"
+hardware_required: true
+certifies: "detector classification: degraded link vs failed device"
+autonomy_class: L2

@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use this standard, please cite it as below."
+title: "Chaos Fidelity for AI Clusters: a machine-checkable standard for fault-injection layer fidelity"
+authors:
+  - family-names: Nanyonga
+    given-names: Margaret
+    affiliation: DIMAGGI AI
+repository-code: "https://github.com/dimaggi-ai/ai-cluster-chaos-fidelity"
+license: MIT
+version: "1.0"
+year: 2026
+keywords:
+  - chaos engineering
+  - fault injection
+  - fidelity
+  - AI training infrastructure
+  - GPU cluster
+  - InfiniBand
+  - DCGM

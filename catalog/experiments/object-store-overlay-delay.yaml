@@ -1,0 +1,19 @@
+name: object-store-overlay-delay
+layer: overlay-network
+wanted_fault: degraded overlay path to the object store
+injection:
+  tool: Chaos Mesh
+  technique: networkchaos-overlay
+  detail: "NetworkChaos delay 200ms/50ms jitter, direction to, target app=object-store, from trainer pods"
+blast_radius: trainer pods in staging namespace
+duration: 3m
+steady_state:
+  - "async saves absorb the latency without stalling the training loop"
+  - "no watchdog trip from a CPU stalled on fsync"
+abort: "steps/s drops below floor for 2m"
+undo: "delete chaos resource; verify save latency baseline"
+owner: ml-infra
+evidence: "metrics.json + save-latency histogram"
+hardware_required: false
+certifies: "the store CLIENT path only - this is tc/netem on the pod veth; it says nothing about RDMA or the store itself. Label honestly."
+autonomy_class: L2

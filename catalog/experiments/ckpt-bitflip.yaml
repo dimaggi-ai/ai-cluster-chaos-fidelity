@@ -1,0 +1,19 @@
+name: ckpt-bitflip
+layer: data-artifacts
+wanted_fault: silent checkpoint corruption (bit rot in file I/O)
+injection:
+  tool: Chaos Mesh
+  technique: iochaos
+  detail: "IOChaos action mistake (bit flips in read/write) on the checkpoint volumePath, low percent"
+blast_radius: one trainer pod's checkpoint mount, staging
+duration: 3m
+steady_state:
+  - "corrupt image rejected by checksum before any weight is loaded"
+  - "no silent acceptance: integrity failure is a hard, logged event"
+abort: "a corrupted checkpoint loads successfully"
+undo: "delete chaos resource; restore from last verified snapshot"
+owner: ml-infra
+evidence: "hash-verification log + resume log"
+hardware_required: false
+certifies: "the integrity gate - availability SLOs cannot see this fault class"
+autonomy_class: L1

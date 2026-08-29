@@ -1,0 +1,19 @@
+name: noisy-neighbor-stress
+layer: orchestration
+wanted_fault: noisy-neighbor CPU/memory pressure on a shared host
+injection:
+  tool: Chaos Mesh
+  technique: stresschaos
+  detail: "StressChaos cpu 2x80% + memory 512MB against a co-tenant pod on the same node as an inference worker"
+blast_radius: one shared node, staging
+duration: 3m
+steady_state:
+  - "victim TTFT p99 degradation stays inside the isolation budget"
+  - "cgroup/MIG isolation attributes the pressure to the offender, not the victim"
+abort: "victim error rate > 1%"
+undo: "delete chaos resource; verify baseline latency"
+owner: platform-oncall
+evidence: "metrics.json + per-cgroup counters"
+hardware_required: true
+certifies: "tenancy isolation under container-level pressure (NOT HBM/device contention - that is gpu-burn's job)"
+autonomy_class: L2

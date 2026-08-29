@@ -1,0 +1,19 @@
+name: dra-slow-allocation
+layer: orchestration
+wanted_fault: slow GPU resource allocation (DRA claim latency) delaying admission
+injection:
+  tool: Chaos Mesh
+  technique: httpchaos
+  detail: "HTTPChaos latency against the DRA driver / resource-claim controller endpoint in staging, so ResourceClaim binding is delayed (DRA is GA since Kubernetes v1.34)"
+blast_radius: staging namespace, one scheduling cycle
+duration: 5m
+steady_state:
+  - "admission degrades gracefully: jobs queue rather than fail or double-schedule"
+  - "no gang is bound against GPUs that are not yet actually allocated"
+abort: "a job binds to unallocated devices, or admission wedges past 5m"
+undo: "delete chaos resource; verify claim-bind latency returns to baseline"
+owner: platform-oncall
+evidence: "scheduler + DRA controller logs + claim-latency histogram"
+hardware_required: false
+certifies: "resilience of the allocation path to a slow resource driver (structured-DRA era)"
+autonomy_class: L1

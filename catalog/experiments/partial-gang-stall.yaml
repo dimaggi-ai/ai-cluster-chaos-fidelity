@@ -1,0 +1,20 @@
+name: partial-gang-stall
+layer: orchestration
+wanted_fault: partial gang placement - one gang member held pending, the gang cannot form
+injection:
+  tool: Chaos Mesh
+  technique: pod-failure
+  detail: "PodChaos action pod-failure (pause) on one worker of an N-worker gang job, so it stays pending in the Service/gang while the rest are Ready"
+blast_radius: one worker of one staging gang job
+duration: 5m
+steady_state:
+  - "the scheduler admits all-or-nothing: it does not start the gang with a missing member (no reserved-but-idle GPU-seconds above budget)"
+  - "either the whole gang waits, or the stalled member is preempted and requeued cleanly - never a seven-of-eight start"
+abort: "the gang starts partially, stranding GPUs, for more than 60s"
+undo: "delete chaos resource; verify the gang forms or requeues"
+owner: platform-oncall
+evidence: "scheduler events + pending-GPU timeline + gang-admission log"
+hardware_required: true
+certifies: "gang/all-or-nothing admission - the orchestration contract a topology-blind scheduler breaks"
+autonomy_class: L1
+notes: "This is the placement fault the recovery simulator prices as gang coupling: a gang cannot proceed without every member."

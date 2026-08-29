@@ -1,0 +1,19 @@
+name: inforom-corrupt-inject
+layer: accelerator
+wanted_fault: fatal GPU fault report (corrupt InfoROM)
+injection:
+  tool: dcgmi via NVSentinel demo harness
+  technique: dcgm-inject
+  detail: "NVSentinel local fault-injection demo pattern: inject InfoROM corruption into (fake) DCGM; health monitor must cordon"
+blast_radius: one node, KIND or staging cluster
+duration: 15m
+steady_state:
+  - "node cordoned automatically; no new pods scheduled"
+  - "drain completes without touching workloads on other nodes"
+abort: "cordon does not appear within 5m, or a second node is drained"
+undo: "remove injection; uncordon; verify schedulability"
+owner: platform-oncall
+evidence: "controller log + node conditions + audit line"
+hardware_required: false
+certifies: "the known-fatal-GPU L2 drill: detect -> cordon -> drain, hands-off"
+autonomy_class: L2

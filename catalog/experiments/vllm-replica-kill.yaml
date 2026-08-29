@@ -1,0 +1,19 @@
+name: vllm-replica-kill
+layer: inference-graph
+wanted_fault: single serving replica death
+injection:
+  tool: Chaos Mesh
+  technique: pod-kill
+  detail: "PodChaos action pod-kill, mode one, on a single-replica vLLM deployment in staging"
+blast_radius: one replica, staging namespace
+duration: 3m
+steady_state:
+  - "process returns; TTFT p99 back inside SLO within T"
+  - "no mixed-weights window (all responses from one model digest)"
+abort: "TTFT p99 > 8s for 60s"
+undo: "delete chaos resource; verify replica count and digest"
+owner: serving-oncall
+evidence: "metrics.json + router log"
+hardware_required: true
+certifies: "restart path + TTFT recovery for the simplest serving unit"
+autonomy_class: L2

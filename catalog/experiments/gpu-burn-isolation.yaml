@@ -1,0 +1,20 @@
+name: gpu-burn-isolation
+layer: accelerator
+wanted_fault: thermal/power excursion under saturating device load
+injection:
+  tool: gpu-burn
+  technique: gpu-burn
+  detail: "time-boxed saturating GEMM in a labeled lab job on one GPU; thermal abort armed"
+blast_radius: one GPU, lab pool only, never a production gang
+duration: 5m
+steady_state:
+  - "throttle reasons are reported and attributed correctly"
+  - "co-located workloads hold their latency floor (PCIe/MIG isolation)"
+abort: "temperature crosses the configured ceiling, or throttling hits a neighbor"
+undo: "stop burn; verify clocks and temperature return to baseline"
+owner: platform-oncall
+evidence: "DCGM field timeline + neighbor latency metrics"
+hardware_required: true
+agent_forbidden: true
+certifies: "device-level isolation and throttle attribution; commissioning-class tool, lab only"
+autonomy_class: L0

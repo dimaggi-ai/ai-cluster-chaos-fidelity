@@ -1,0 +1,19 @@
+name: wrong-adapter-mount
+layer: inference-graph
+wanted_fault: wrong model adapter served (weight skew across replicas)
+injection:
+  tool: deployment manifest
+  technique: artifact-swap
+  detail: "mount a previous adapter digest on one replica (the inverse of pin_artifact)"
+blast_radius: one replica, staging namespace
+duration: 15m
+steady_state:
+  - "frozen eval canary fires before any customer-visible SLO does"
+  - "quality agent quarantines the replica or pins the correct digest"
+abort: "canary silent for 10m while skew is live"
+undo: "restore correct digest; verify canary green"
+owner: serving-oncall
+evidence: "canary eval results + digest audit log"
+hardware_required: false
+certifies: "the quality contract - a 200 OK on the wrong weights is the fault latency SLOs miss"
+autonomy_class: L1

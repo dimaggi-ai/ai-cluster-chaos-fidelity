@@ -1,0 +1,19 @@
+name: ckpt-eio
+layer: data-artifacts
+wanted_fault: checkpoint save/load I/O errors
+injection:
+  tool: Chaos Mesh
+  technique: iochaos
+  detail: "IOChaos action fault, errno 5 (EIO), percent 50, volumePath /mnt/checkpoints"
+blast_radius: one trainer pod's checkpoint mount, staging
+duration: 3m
+steady_state:
+  - "failed saves are retried or surfaced; no success log for a partial write"
+  - "resume path rejects a truncated file by hash and falls back to last good digest"
+abort: "trainer crash-loops more than twice"
+undo: "delete chaos resource; verify a clean save/load round trip"
+owner: ml-infra
+evidence: "metrics.json + save/load log + hash log"
+hardware_required: false
+certifies: "checkpoint-integrity contract under store failure"
+autonomy_class: L1

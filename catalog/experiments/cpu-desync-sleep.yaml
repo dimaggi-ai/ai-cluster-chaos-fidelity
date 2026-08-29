@@ -1,0 +1,21 @@
+name: cpu-desync-sleep
+layer: training-graph
+wanted_fault: CPU desync straggler - NCCL watchdog timeout with healthy GPUs
+injection:
+  tool: shell in worker container
+  technique: cpu-sleep
+  detail: "SIGSTOP or long sleep on one rank's CPU before its next collective (simulates dataloader stall / checkpoint fsync)"
+blast_radius: one rank of one staging job
+duration: 20m
+steady_state:
+  - "the failure is classified as desync, not hardware (no cordon of a healthy node)"
+  - "detection happens at the desync-detection clock, not only at the 600 s watchdog"
+abort: "controller cordons or resets any node"
+undo: "SIGCONT / remove sleep; verify job resumes or restarts cleanly"
+owner: ml-infra
+evidence: "flight-recorder style dump + controller classification log"
+hardware_required: true
+certifies: >-
+  the classifier that separates CPU-side desync (the majority class of NCCL
+  watchdog timeouts in Meta's fleet data) from real network/hardware faults
+autonomy_class: L1

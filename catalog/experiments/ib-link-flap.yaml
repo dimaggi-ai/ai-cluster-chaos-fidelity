@@ -1,0 +1,29 @@
+name: ib-link-flap
+layer: fabric
+wanted_fault: RDMA rail loss / InfiniBand link flap on the collective's data path
+injection:
+  tool: switch CLI / ibportstate / vendor link-disable
+  technique: ib-link-down
+  detail: >-
+    Bounce one IB/RoCE port on the switch (or ibportstate disable, or a vendor
+    link-disable you can re-enable), toward one node's HCA, for 10-30s. This is
+    the ONLY honest way to fault the collective's path: NCCL runs over RDMA
+    (kernel bypass), so tc/netem on the NIC (chaosd-nic / networkchaos) does NOT
+    reach it. Requires real hardware and switch access.
+blast_radius: one HCA/port, one staging job, one peer
+duration: 30s
+steady_state:
+  - "job fails closed or retries cleanly; no half-written checkpoint"
+  - "NCCL_IB_TIMEOUT fires before the PyTorch watchdog (the two clocks are ordered)"
+  - "controller marks a rail/link, not a GPU"
+abort: "link stays down past the injection window, or a second node is affected"
+undo: "re-enable the port; verify link state, BER, and NCCL rendezvous"
+owner: fabric-oncall
+evidence: "metrics.json + NCCL transport log + switch port counters"
+hardware_required: true
+agent_forbidden: true
+certifies: "fail-closed collective behavior on a real RDMA link loss; rail-vs-GPU classification. Stays L0-L1 until undo is mechanical."
+autonomy_class: L0
+notes: >-
+  Contrast ip-bootstrap-delay, which uses chaosd-nic (tc/netem) and honestly
+  certifies only the IP bootstrap/rendezvous path, not AllReduce.

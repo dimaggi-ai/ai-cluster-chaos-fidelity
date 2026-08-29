@@ -1,0 +1,20 @@
+name: planner-kill-mid-heal
+layer: control-plane
+wanted_fault: planner death in the middle of an approved remediation
+injection:
+  tool: Chaos Mesh
+  technique: pod-kill
+  detail: "PodChaos pod-kill on the planner/supervisor pod while a multi-step drain is in flight"
+blast_radius: control plane, staging; one in-flight remediation
+duration: 10m
+steady_state:
+  - "in-flight typed tools finish or roll back; no half-completed drain"
+  - "no new writes start while the brain is dark (fail closed)"
+  - "replay log resumes the plan exactly once - no double-drain"
+abort: "a second drain fires, or writes continue with the planner down"
+undo: "restart planner; verify replay-log convergence"
+owner: platform-oncall
+evidence: "tool traces + replay log + node state timeline"
+hardware_required: false
+certifies: "fail-closed control plane; the drill that gates any L2+ promotion"
+autonomy_class: L1
