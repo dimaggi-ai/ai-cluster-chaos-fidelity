@@ -44,10 +44,13 @@ python3 catalog/validate.py your-experiment.yaml   # lint one of your own
 Or install the linter as a command and run it on your own specs anywhere:
 
 ```
-pip install git+https://github.com/dimaggi-ai/ai-cluster-chaos-fidelity
-chaos-fidelity my-experiment.yaml     # lint one spec (or a directory of them)
-chaos-fidelity                        # lint the bundled reference catalog
+pip install ai-cluster-chaos-fidelity     # from PyPI
+chaos-fidelity my-experiment.yaml         # lint one spec (or a directory of them)
+chaos-fidelity                            # lint the bundled reference catalog
+chaos-fidelity --help                     # usage
 ```
+
+(Or install the latest from source: `pip install git+https://github.com/dimaggi-ai/ai-cluster-chaos-fidelity`.)
 
 The linter is the point: a prose taxonomy gets nodded at and violated under deadline; a machine rule fails the pull request. The [validator tests](catalog/test_validate.py) prove that hand-written wrong specs — including the subtle `tc`-on-RDMA case — fail for the stated reason.
 
