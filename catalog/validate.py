@@ -196,6 +196,16 @@ def _collect(args: list[str]) -> list[Path]:
 
 
 def main(argv: list[str]) -> int:
+    if any(a in ("-h", "--help") for a in argv[1:]):
+        print(
+            "chaos-fidelity — validate AI-cluster chaos experiment specs against the "
+            "fidelity standard.\n\n"
+            "Usage:\n"
+            "  chaos-fidelity [SPEC.yaml | DIR ...]\n\n"
+            "With no arguments, validates the bundled reference catalog.\n"
+            "Exit status: 0 if all specs are valid, 1 otherwise."
+        )
+        return 0
     paths = _collect(argv[1:])
     if not paths:
         print("no specs found (pass a .yaml file or a directory of specs)")
