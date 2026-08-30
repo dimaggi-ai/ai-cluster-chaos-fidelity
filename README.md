@@ -41,6 +41,14 @@ make test                       # lint the catalog + prove wrong specs are rejec
 python3 catalog/validate.py your-experiment.yaml   # lint one of your own
 ```
 
+Or install the linter as a command and run it on your own specs anywhere:
+
+```
+pip install git+https://github.com/dimaggi-ai/ai-cluster-chaos-fidelity
+chaos-fidelity my-experiment.yaml     # lint one spec (or a directory of them)
+chaos-fidelity                        # lint the bundled reference catalog
+```
+
 The linter is the point: a prose taxonomy gets nodded at and violated under deadline; a machine rule fails the pull request. The [validator tests](catalog/test_validate.py) prove that hand-written wrong specs — including the subtle `tc`-on-RDMA case — fail for the stated reason.
 
 The standard is tool-agnostic on purpose: the specs name a *technique*, not a vendor. Chaos Mesh [1] supplies the Kubernetes-layer forms here, but the same experiments run under Litmus [2] or a cloud fault-injection service [4] when the cluster is managed; ChaosEater [3] is the current precedent for generating specs like these with an LLM — exactly the loop the governed-autonomy sequel governs.

@@ -180,12 +180,25 @@ def validate_spec(spec: dict, fname: str) -> list[str]:
     return errors
 
 
-def main(argv: list[str]) -> int:
+def _collect(args: list[str]) -> list[Path]:
+    """Expand file/dir arguments to a flat list of YAML spec paths. With no
+    args, fall back to the bundled reference catalog (so the installed CLI
+    validates something useful out of the box)."""
     here = Path(__file__).resolve().parent
-    paths = ([Path(p) for p in argv[1:]] if len(argv) > 1
-             else sorted((here / "experiments").glob("*.yaml")))
+    raw = [Path(a) for a in args] if args else [here / "experiments"]
+    out: list[Path] = []
+    for p in raw:
+        if p.is_dir():
+            out.extend(sorted(p.glob("*.yaml")))
+        else:
+            out.append(p)
+    return out
+
+
+def main(argv: list[str]) -> int:
+    paths = _collect(argv[1:])
     if not paths:
-        print("no specs found")
+        print("no specs found (pass a .yaml file or a directory of specs)")
         return 1
     all_errors: list[str] = []
     for p in paths:
@@ -206,6 +219,11 @@ def main(argv: list[str]) -> int:
         return 1
     print(f"\nall {len(paths)} specs valid")
     return 0
+
+
+def cli() -> None:
+    """Console entry point (`chaos-fidelity [spec.yaml | dir ...]`)."""
+    raise SystemExit(main(sys.argv))
 
 
 if __name__ == "__main__":
