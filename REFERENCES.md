@@ -32,3 +32,7 @@ Every factual claim in this standard traces to a source below. Items were verifi
 ## Failure classes named as out-of-scope
 
 - **[16]** Silent data corruption at scale: Dixit et al. (Meta), "Silent Data Corruptions at Scale," arXiv:2102.11245; Hochschild et al. (Google), "Cores that don't count," HotOS 2021. Computational SDC — a device silently producing wrong results with no error signal — the failure class checksum-on-checkpoint cannot catch, and DCGM injection cannot certify. https://arxiv.org/abs/2102.11245
+
+## Published failure taxonomy (coverage validation)
+
+- **[17]** Grattafiori et al. (Meta), "The Llama 3 Herd of Models," arXiv:2407.21783 — root-cause table for the 405B pre-training run: 54 days, 16,384 H100s, 419 unexpected interruptions; itemized causes quoted verbatim in `catalog/coverage.py` (faulty GPUs 148 / 30.1%, HBM3 72 / 17.2%, software bugs 54 / 12.9%, network switch/cable 35 / 8.4%, unplanned host maintenance 32 / 7.6%, GPU SRAM 19 / 4.5%, GPU system processor 17 / 4.1%). Counts and percentages are reproduced as published and not reconciled: the table itemizes 18 rows (eleven further rows at or below 1.7% total 42 interruptions), and its top row is internally inconsistent (148/419 = 35.3% against the printed 30.1%), so the printed shares sum to ~94.9% — the residual is left where the source left it. https://arxiv.org/abs/2407.21783

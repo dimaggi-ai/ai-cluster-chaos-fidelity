@@ -5,7 +5,10 @@ from pathlib import Path
 
 import yaml
 
-from validate import validate_spec
+try:
+    from .validate import validate_spec
+except ImportError:                      # run as a script from catalog/
+    from validate import validate_spec
 
 GOOD = {
     "name": "t",

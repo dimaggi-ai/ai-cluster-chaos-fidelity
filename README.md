@@ -60,13 +60,41 @@ The standard is tool-agnostic on purpose: the specs name a *technique*, not a ve
 
 A checklist is advice; a standard is enforcement with an ecosystem. This repo is versioned ([SPEC.md](SPEC.md) carries the version), the schema is stable, and the catalog is meant to grow by contribution — see [CONTRIBUTING.md](CONTRIBUTING.md). The honest scope is stated up front, including the failure classes the catalog does **not** yet cover (SDC, correlated power/cooling, stragglers, checkpoint-store outages) in [catalog/README.md](catalog/README.md#coverage--and-what-is-deliberately-out-of-scope) — listing them is the alternative to a coverage matrix that looks complete because it is small.
 
+## The coverage validation
+
+Does the catalog rehearse the failures that actually interrupt production
+training? [catalog/coverage.py](catalog/coverage.py) checks it against the
+most-cited public root-cause table for a frontier training run: Meta's
+54-day Llama 3 405B snapshot — 419 unexpected interruptions on 16,384
+H100s [17]. Every published failure class maps either to catalog
+experiments that are machine-checked to exist, sit on the right layer,
+and pass the linter, or to an honest NOT-COVERED entry with the reason.
+Result: **73.1% of the published interruption share (328/419 = 78.3% by
+published count) is rehearsed by a right-layer experiment** — faulty
+GPUs and HBM3/SRAM at the DCGM detection→cordon loop (the reaction to
+the reported fault, not survival of the physical event — the distinction
+[docs/fidelity-taxonomy.md](docs/fidelity-taxonomy.md) enforces),
+software bugs via rank-kill and desync, switch/cable faults via a real
+link flap. The uncovered rest is named: unplanned host maintenance
+(injectable via node-drain; a planned catalog addition), GSP hangs (no
+faithful software injection exists), and the source's eleven-row
+published long tail including SDC [16]. The registry quotes the
+published counts and shares verbatim and refuses to reconcile them —
+the source's own table is internally inconsistent on its top row, so
+its shares sum to ~94.9%, and that residual is disclosed, not absorbed.
+The synthetic side of the validation is
+[catalog/test_validate.py](catalog/test_validate.py): deliberately
+wrong specs pushed through the linter, asserted to fail for the stated
+reason.
+
 ## Reproduce
 
 ```
 pip install pyyaml
 make test                    # validator (20 specs valid) + rejection tests
 python3 catalog/validate.py  # lint the whole catalog
-python3 catalog/test_validate.py
+python3 catalog/coverage.py  # catalog vs the published failure taxonomy
+python3 catalog/test_validate.py && python3 catalog/test_coverage.py
 ```
 
 Python 3.11+, `pyyaml`. The checks run on every push via [CI](.github/workflows/ci.yml) — a machine-checkable standard must machine-check itself.
