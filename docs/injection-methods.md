@@ -72,6 +72,14 @@ No CRD required. Mount a previous adapter digest on one replica (the inverse of 
 
 Delete the healer pod mid-drain; block the referee RPC; have the planner emit a non-allow-listed tool; race two agents with a simultaneous DCGM fault and overlay delay. The contract: fail closed, one drain, undo runs, an audit line exists. This is where the [governed-autonomy sequel](../README.md#series) meets chaos — the referee that denies an illegal remediation is a Tool Guard-class policy firewall, and it is tested here, not assumed. Specs: [`healer-illegal-proposal`](../catalog/experiments/healer-illegal-proposal.yaml), [`planner-kill-mid-heal`](../catalog/experiments/planner-kill-mid-heal.yaml).
 
+## 10. Plant and scale-across injection (SPEC v1.1)
+
+These five need a scheduled window, a human at the control, and `agent_forbidden: true` — a planner may never fire any of them.
+
+- **Inter-hall circuit** — disable one transport circuit at the line system or DWDM client port (`circuit-disable`) with a cross-hall job running: the fault is a whole circuit gone while *both* halls' fabrics stay green. For a retune, command the OCS port move (`ocs-port-retune`) and measure the reconfiguration window against the two clocks — a retune self-recovers, a cut does not, and the linter refuses to let one stand in for the other. Specs: [`metro-circuit-cut`](../catalog/experiments/metro-circuit-cut.yaml), [`ocs-retune-window`](../catalog/experiments/ocs-retune-window.yaml).
+- **Facility** — open one feeder breaker (`feeder-open`) in a maintenance window with the UPS path proven: what you certify is simultaneous loss plus the restart *order* on the way back. Stop one CDU (`cdu-stop`) against the hall's *measured* ride-through, with inlet alarms armed: what you certify is that load sheds inside the window. Specs: [`hall-feeder-open`](../catalog/experiments/hall-feeder-open.yaml), [`coolant-loop-loss`](../catalog/experiments/coolant-loop-loss.yaml).
+- **Shared storage** — degrade the parallel filesystem server-side (`pfs-degrade`): stop an MDS or throttle metadata on a staging filesystem, so every rank blocks at the same instant on a healthy fabric. The steady-state contract is classification: the controller says STORAGE, and no rail or GPU is marked. Spec: [`pfs-metadata-stall`](../catalog/experiments/pfs-metadata-stall.yaml).
+
 ## Fidelity and safety, in one table
 
 | Wanted fault | Acceptable injection | Wrong injection |
@@ -79,9 +87,14 @@ Delete the healer pod mid-drain; block the referee RPC; have the planner emit a 
 | Uncorrectable ECC reported | `dcgm-inject` ECC field | overlay packet loss |
 | GPU off bus (XID 79) | lab/physical only | field inject that leaves NVML up |
 | Rank death | `pod-kill` / SIGKILL one worker | `NetworkChaos` on eth0 |
-| IB flap | Chaosd on the RDMA `device` | `NetworkChaos` delay 200 ms |
+| IB flap | `ib-link-down`: switch port bounce / `ibportstate` | `tc`/`netem` anywhere — Chaosd on the NIC included; RDMA bypasses it |
 | CPU desync timeout | `cpu-sleep` on one rank | GPU reset |
 | Bad checkpoint | `IOChaos` fault/mistake on ckpt path | pod memory stress |
 | Wrong model | mount the wrong digest | kill the router |
+| Metro / inter-hall cut | `circuit-disable` at the transport layer | `ib-link-down` (wrong hall scope) |
+| OCS retune | `ocs-port-retune` (measure the window) | `circuit-disable` (a cut is not a window) |
+| Hall power loss | `feeder-open` in a window | `pod-kill` ×N |
+| Coolant loop loss | `cdu-stop` vs the ride-through clock | `gpu-burn` (heat is not cooling) |
+| PFS stall | `pfs-degrade` server-side | `IOChaos` on one pod; any fabric fault |
 
 The [validator](../catalog/validate.py) rejects every entry in the right-hand column with its reason — which is why the taxonomy survives a deadline instead of being quietly ignored under one.

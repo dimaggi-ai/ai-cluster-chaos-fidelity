@@ -1,0 +1,35 @@
+name: coolant-loop-loss
+layer: facility
+wanted_fault: coolant loop loss to one hall - the CDU stops while the racks keep drawing their load
+injection:
+  tool: CDU control panel / BMS, scheduled window
+  technique: cdu-stop
+  detail: >-
+    Stop one coolant distribution unit, or close its supply valve, for a bounded
+    window while the hall runs. Inlet-temperature alarms armed, an operator on
+    the valve, and the window sized against the hall's measured ride-through -
+    not against a round number someone liked.
+blast_radius: the racks on one CDU in one hall
+duration: 60s
+steady_state:
+  - "load sheds INSIDE the ride-through window, not after it"
+  - "the shed is ordered: lowest-value work first, checkpointing jobs given their write"
+  - "no accelerator reaches its own throttle point during the window"
+abort: "inlet temperature crosses the alarm, or the shed has not begun at half the ride-through budget"
+undo: "restart the CDU; verify flow and inlet temperature, then re-admit the shed work"
+owner: facilities + cluster-oncall (jointly, by design)
+evidence: "metrics.json + inlet/outlet temperature trace + shed event log + CDU telemetry"
+hardware_required: true
+agent_forbidden: true
+certifies: >-
+  the load shed fires inside the seconds-scale buffer a liquid-cooled hall
+  actually has. It does NOT certify the SIZE of that buffer: ride-through is a
+  plant property - stored thermal energy over rack load - and it is measured,
+  not injected.
+autonomy_class: L0
+notes: >-
+  The window is short, and the denser the cooling rung the shorter it gets: the
+  companion cooling study measures roughly 11s of ride-through for direct-to-chip
+  at its own density ceiling against roughly 250s for legacy air. A shed
+  procedure that has never been rehearsed against an 11s clock is a document,
+  not a control.

@@ -1,0 +1,34 @@
+name: metro-circuit-cut
+layer: inter-hall-circuit
+wanted_fault: metro fibre cut between halls - one inter-hall transport circuit lost
+injection:
+  tool: line-system NMS / transport client-port disable
+  technique: circuit-disable
+  detail: >-
+    Disable one inter-hall circuit at the transport layer (line-system port or
+    DWDM client port) while a cross-hall collective is running. This is a whole
+    circuit going away, not a port bouncing: the intra-hall fabric stays healthy
+    on both sides, which is exactly what makes it a different fault from a rail
+    flap. Requires transport access and a scheduled window.
+blast_radius: one of several inter-hall circuits, one staging job spanning two halls
+duration: 60s
+steady_state:
+  - "the job survives on the remaining circuits at reduced cross-hall bandwidth, or fails closed - it does not hang"
+  - "the controller labels a CIRCUIT: no rail is marked, no GPU is cordoned"
+  - "intra-hall port counters do not move on either side"
+abort: "a second circuit drops, or intra-hall port events appear (the blast radius left the transport layer)"
+undo: "re-enable the client port; verify optical power, BER, and that the collective re-forms across halls"
+owner: transport-oncall
+evidence: "metrics.json + line-system alarm log + per-circuit counters + NCCL transport log"
+hardware_required: true
+agent_forbidden: true
+certifies: >-
+  cross-hall degradation is survived or failed closed, and the fault is
+  classified as transport rather than fabric. It does NOT certify a dark-fibre
+  repair: this circuit returns with one command, a real cut returns in hours, so
+  the recovery this exercises is the re-pin, not the restoration.
+autonomy_class: L0
+notes: >-
+  The deliberate contrast is ib-link-flap, which faults one port inside one hall.
+  Same words in a hurry ("the link went down"), different topology, different
+  owner, different recovery.

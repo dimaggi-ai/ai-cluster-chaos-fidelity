@@ -1,0 +1,32 @@
+name: hall-feeder-open
+layer: facility
+wanted_fault: utility feed lost to one hall - breaker open on the feeder
+injection:
+  tool: site electrical, scheduled maintenance window
+  technique: feeder-open
+  detail: >-
+    Open one feeder breaker serving a single hall - or one PDU branch for a
+    rack-scale rehearsal - during a scheduled window, with the UPS/generator
+    path already proven and an operator at the switchgear. Never on a feeder
+    carrying the only copy of anything.
+blast_radius: one hall on one feeder - plural by construction; this is the correlated case, not a single node
+duration: 120s
+steady_state:
+  - "every job on the hall is marked lost within one scheduling interval - nothing is left 'running' on a dead hall"
+  - "restart order is respected on the way back: storage and control plane before trainers"
+  - "the scheduler does not immediately re-place the lost jobs onto the same hall"
+abort: "the feed does not restore on command, or a second hall's telemetry moves"
+undo: "close the breaker; verify phase balance and rack-level draw before re-admitting work"
+owner: facilities + cluster-oncall (jointly, by design)
+evidence: "metrics.json + switchgear log + scheduler event log + per-rack power draw"
+hardware_required: true
+agent_forbidden: true
+certifies: >-
+  simultaneous loss of many individually healthy nodes, and the restart ORDER on
+  the way back. It does NOT certify the electrical protection scheme itself -
+  that is the plant's own commissioning test, not a chaos experiment.
+autonomy_class: L0
+notes: >-
+  This is the correlated multi-node failure the rest of the catalogue does not
+  reach: every other spec has a singular blast radius by construction, and a
+  recovery model calibrated only on singular failures has never seen this shape.

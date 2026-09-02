@@ -1,0 +1,33 @@
+name: pfs-metadata-stall
+layer: shared-storage
+wanted_fault: shared parallel filesystem metadata stall - every rank blocks on the same mount at once (Lustre MDS)
+injection:
+  tool: Lustre admin / storage vendor API
+  technique: pfs-degrade
+  detail: >-
+    Stop one MDS, or throttle metadata operations server-side, on a staging
+    filesystem for a bounded window. Server-side is the whole point: every
+    client sees it at the same instant. Faulting one pod's volume with IOChaos
+    is a different experiment and lives on data-artifacts.
+blast_radius: every rank mounting the staging filesystem - plural by construction
+duration: 180s
+steady_state:
+  - "trainers block and resume; none of them declares a rank dead"
+  - "the controller labels STORAGE: no rail is marked, no device is cordoned"
+  - "the save path backs off rather than retrying into the stall"
+abort: "any job is torn down as a rank failure, or a second filesystem shows latency"
+undo: "restart the MDS / lift the throttle; verify metadata latency and one clean save-load round trip"
+owner: storage-oncall
+evidence: "metrics.json + MDS latency histogram + trainer stall trace + controller classification log"
+hardware_required: true
+certifies: >-
+  correct CLASSIFICATION of a shared-storage stall, and the back-off behaviour
+  under it. It does NOT certify the filesystem's own failover. It is explicitly
+  not an ICI break: the compute fabric is untouched throughout, which is the
+  point of cataloguing it separately.
+autonomy_class: L0
+notes: >-
+  hardware_required is true for a plant reason rather than an accelerator one -
+  there is no faithful way to stall a shared filesystem without a shared
+  filesystem. autonomy_class is L0 despite the technique being pure software:
+  the blast radius is everyone.

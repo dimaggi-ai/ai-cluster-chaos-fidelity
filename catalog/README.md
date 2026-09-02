@@ -20,15 +20,20 @@ python3 test_validate.py                  # prove wrong specs are rejected
 2. **Fidelity lint.** If the `wanted_fault` and the `injection.technique` live
    on different layers, the spec is rejected with the reason (an IB flap on the
    overlay, an XID via pod-kill, a desync via GPU reset all fail).
-3. **Agent safety.** Physically-stressing techniques (`chaosd-nic`, `gpu-burn`)
-   must set `agent_forbidden: true` — an autonomous planner may never fire them.
+3. **Agent safety.** Physically-stressing techniques (`chaosd-nic`, `gpu-burn`,
+   `ib-link-down`, `ocs-port-retune`, `circuit-disable`, `feeder-open`,
+   `cdu-stop`) must set `agent_forbidden: true` — an autonomous planner may
+   never fire them.
+4. **Layer map.** The technique must live on the layer the spec declares — a
+   fault maps to one layer, and filing a real injection under the wrong one
+   inherits that layer's coverage claim without testing it.
 
 ## Spec fields
 
 | Field | Meaning |
 |---|---|
 | `name` | unique id (matches filename) |
-| `layer` | one of the eight cluster layers |
+| `layer` | one of the eleven cluster layers |
 | `wanted_fault` | the real fault this experiment stands in for |
 | `injection.tool` / `.technique` | how it is injected; technique from the known set |
 | `blast_radius` | scope — one GPU / one rank / one replica first |
@@ -49,13 +54,22 @@ the validator run anywhere; the injections that touch silicon do not.
 
 ## Coverage — and what is deliberately out of scope
 
-The 20 specs span all eight layers, but not evenly: accelerator (4), orchestration
+The 25 specs span all eleven layers, but not evenly: accelerator (4), orchestration
 (3), inference-graph (3), data-artifacts (3), training-graph (2), control-plane (2),
-overlay-network (2), fabric (1). Single-layer coverage is a starting point, not a
-claim of completeness. (The fabric spec and one overlay spec are a deliberate pair —
-[`ib-link-flap`](experiments/ib-link-flap.yaml) faults the real RDMA path, while
-[`ip-bootstrap-delay`](experiments/ip-bootstrap-delay.yaml) uses `tc`/`netem` and
-certifies only the IP path — demonstrating the standard's sharpest fidelity rule.)
+overlay-network (2), facility (2), inter-hall-circuit (2), fabric (1),
+shared-storage (1). Coverage of a layer is a starting point, not a claim of
+completeness. Two deliberate pairs demonstrate the standard's sharpest rules:
+[`ib-link-flap`](experiments/ib-link-flap.yaml) faults the real RDMA path while
+[`ip-bootstrap-delay`](experiments/ip-bootstrap-delay.yaml) uses `tc`/`netem`
+and certifies only the IP path; and [`metro-circuit-cut`](experiments/metro-circuit-cut.yaml)
+takes a circuit *between* halls away while
+[`ocs-retune-window`](experiments/ocs-retune-window.yaml) only moves one — a cut
+and a retune are two experiments, and so is
+[`ib-link-flap`](experiments/ib-link-flap.yaml) versus either of them (inside a
+hall versus between halls). [`pfs-metadata-stall`](experiments/pfs-metadata-stall.yaml)
+carries the rule the v1.1 extension exists for: **a PFS stall is not an ICI
+break** — every rank blocks at once on a healthy fabric, and a spec that
+certifies it with a fabric injection is rejected.
 
 Failure classes **not yet catalogued**, named here so the omission is deliberate
 rather than implied:
@@ -65,15 +79,23 @@ rather than implied:
   `ckpt-bitflip` covers checkpoint *file* bit-rot, which is detectable by checksum;
   computational SDC is the harder, undetectable-at-the-checkpoint case and deserves its
   own spec with explicit fidelity limits.
-- **Correlated / multi-node failures** — every current spec has a singular blast radius
-  (one node/rank/replica); a rack/PDU/cooling event that takes out many nodes at once
-  is exactly the fault the recovery model's spare-pool tail is most sensitive to.
 - **Persistent slow node (gray failure)** — a thermally-throttled or slow-NIC node that
   never *fails* but drags the whole collective to its speed. `cpu-desync-sleep` is a hard
   stop, not a persistent degradation.
-- **Fleet-wide checkpoint-store outage** — `ckpt-eio` is per-pod; the shared store being
-  degraded for everyone at once is a different, larger fault.
-- **Power / cooling events** — PDU trip, power-cap throttle, CRAC failure.
+- **Sustained power-cap throttle** — `hall-feeder-open` covers the feed going away;
+  a hall running *derated* for hours is a gray degradation, closer to the slow-node
+  case than to an outage, and needs its own steady-state contract.
+- **Restoration-scale events** — `metro-circuit-cut` certifies the re-pin onto the
+  surviving circuits, not the hours-later restoration; `hall-feeder-open` certifies
+  the restart order, not a grid event taking several sites at once.
+
+Three gaps named in v1.0 are now catalogued rather than listed: correlated
+multi-node failure ([`hall-feeder-open`](experiments/hall-feeder-open.yaml) —
+plural by construction), the shared-store outage
+([`pfs-metadata-stall`](experiments/pfs-metadata-stall.yaml) — server-side, every
+rank at once, where `ckpt-eio` is per-pod), and the cooling event
+([`coolant-loop-loss`](experiments/coolant-loop-loss.yaml) — the ride-through
+clock).
 
 These are tracked for future catalog versions (and modelled in the companion
 reliability-economics study); listing them here is the honest alternative to a

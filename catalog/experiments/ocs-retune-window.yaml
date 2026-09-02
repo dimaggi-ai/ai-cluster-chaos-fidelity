@@ -1,0 +1,33 @@
+name: ocs-retune-window
+layer: inter-hall-circuit
+wanted_fault: OCS circuit retune under a live collective - the reconfiguration window
+injection:
+  tool: optical circuit switch controller (vendor API / OpenConfig)
+  technique: ocs-port-retune
+  detail: >-
+    Issue a port-mapping change on the optical circuit switch that moves one
+    circuit to a different port pair, and let it re-establish. Milliseconds of
+    switching, then re-establishment: the fault under test is the WINDOW and the
+    re-establishment, not a loss of light. Requires an OCS and a scheduled window.
+blast_radius: one circuit, one staging job, one switching event
+duration: 30s
+steady_state:
+  - "the collective crosses the window without a watchdog trip"
+  - "the two clocks stay ordered: the transport timeout is longer than the vendor's switching time and shorter than the framework watchdog"
+  - "the controller records a planned reconfiguration, not a link fault"
+abort: "the circuit does not re-establish within the vendor's stated switching time, or the watchdog fires"
+undo: "restore the original port mapping; verify optical power and circuit inventory"
+owner: transport-oncall
+evidence: "metrics.json + OCS event log + switching-time measurement + NCCL transport log"
+hardware_required: true
+agent_forbidden: true
+certifies: >-
+  the collective rides through a PLANNED circuit move. It does NOT certify an
+  unplanned one: a retune scheduled between steps and a retune in the middle of
+  an all-reduce are two experiments, and only the first is in this catalogue.
+autonomy_class: L0
+notes: >-
+  Why agent_forbidden even though the retune is routine: the companion
+  governed-autonomy gate gives retuning a live collective no autonomy level at
+  any evidence level, and this is the same act. A planner may request a circuit;
+  it may not move one out from under a running job.

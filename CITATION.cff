@@ -7,7 +7,7 @@ authors:
     affiliation: DIMAGGI AI
 repository-code: "https://github.com/dimaggi-ai/ai-cluster-chaos-fidelity"
 license: MIT
-version: "1.0"
+version: "1.1"
 year: 2026
 keywords:
   - chaos engineering
