@@ -1,0 +1,97 @@
+{
+  "schema_version": "dimaggi-evidence/v1",
+  "coverage_scope": "Consequential headline claims, governing assumptions and model limits. Not a catalog of helper constants or proof that citations are correct.",
+  "sources": {
+    "README.md": {
+      "source_type": "model-assumption",
+      "location": "README.md",
+      "version_date": "2026-09-10 closure working tree; SHA-256 bound below",
+      "license_or_reuse": "Repository-authored analysis; third-party facts referenced, no new external raw data redistributed",
+      "scope": "Local authoritative definition or claim. External provenance retained in SOURCES/REFERENCES and inline citations; scenario choices are not empirical measurements."
+    },
+    "REFERENCES.md": {
+      "source_type": "model-assumption",
+      "location": "REFERENCES.md",
+      "version_date": "2026-09-10 closure working tree; SHA-256 bound below",
+      "license_or_reuse": "Repository-authored analysis; third-party facts referenced, no new external raw data redistributed",
+      "scope": "Local authoritative definition or claim. External provenance retained in SOURCES/REFERENCES and inline citations; scenario choices are not empirical measurements."
+    },
+    "Makefile": {
+      "source_type": "model-assumption",
+      "location": "Makefile",
+      "version_date": "2026-09-10 closure working tree; SHA-256 bound below",
+      "license_or_reuse": "Repository-authored analysis; third-party facts referenced, no new external raw data redistributed",
+      "scope": "Local authoritative definition or claim. External provenance retained in SOURCES/REFERENCES and inline citations; scenario choices are not empirical measurements."
+    },
+    "catalog/validate.py": {
+      "source_type": "model-assumption",
+      "location": "catalog/validate.py",
+      "version_date": "2026-09-10 closure working tree; SHA-256 bound below",
+      "license_or_reuse": "Repository-authored analysis; third-party facts referenced, no new external raw data redistributed",
+      "scope": "Local authoritative definition or claim. External provenance retained in SOURCES/REFERENCES and inline citations; scenario choices are not empirical measurements."
+    },
+    "SPEC.md": {
+      "source_type": "model-assumption",
+      "location": "SPEC.md",
+      "version_date": "2026-09-10 closure working tree; SHA-256 bound below",
+      "license_or_reuse": "Repository-authored analysis; third-party facts referenced, no new external raw data redistributed",
+      "scope": "Local authoritative definition or claim. External provenance retained in SOURCES/REFERENCES and inline citations; scenario choices are not empirical measurements."
+    }
+  },
+  "inputs": [
+    {
+      "name": "fault layer declaration",
+      "unit": "claim",
+      "evidence_class": "scenario",
+      "sources": [
+        "SPEC.md"
+      ],
+      "transformation": "Caller-supplied fault mechanism and target layer; authenticity is not established by this specification",
+      "uncertainty": "Deliberately hypothetical/operator policy; not an observed universal bound",
+      "affected_outputs": [
+        "published conclusion",
+        "README.md"
+      ],
+      "statement": "Caller-supplied fault mechanism and target layer; authenticity is not established by this specification"
+    }
+  ],
+  "results": [
+    {
+      "name": "fidelity contract",
+      "unit": "claim",
+      "evidence_class": "sanity-bound",
+      "sources": [
+        "README.md"
+      ],
+      "transformation": "Experiment-spec validation checks layer/mechanism compatibility; passing does not establish actual physical fault injection or recovery",
+      "uncertainty": "Scope and qualifications stated in transformation and linked source; no unreported confidence interval",
+      "affected_outputs": [
+        "published conclusion",
+        "README.md"
+      ],
+      "statement": "Experiment-spec validation checks layer/mechanism compatibility; passing does not establish actual physical fault injection or recovery"
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "README.md",
+      "sha256": "78823cd9bb57fee6b69f1959a0eaf6624906ed8101e0e3c42ddf07f4aa71b3de"
+    },
+    {
+      "path": "REFERENCES.md",
+      "sha256": "f7ab80de77fa424229538d86c8155147667a85cec3b95a698ea474b38c8fd3cd"
+    },
+    {
+      "path": "Makefile",
+      "sha256": "a7abd80001c4941dda46544856fe4e1792a31b6be3306f92e2cb5e1f019e67f5"
+    },
+    {
+      "path": "catalog/validate.py",
+      "sha256": "f575cd6b17570688aa1d790b07bbd3542bf73283cc549622b9f7c0e3c75f495b"
+    },
+    {
+      "path": "SPEC.md",
+      "sha256": "92a565cb5b5a62abf783aaaa8e770c14bcd3bcbd94d01a9532f986396397784a"
+    }
+  ]
+}
