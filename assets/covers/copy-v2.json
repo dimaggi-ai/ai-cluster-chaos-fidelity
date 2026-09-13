@@ -1,0 +1,18 @@
+[
+  {
+    "repo": "ai-cluster-chaos-fidelity",
+    "label": "AI INFRASTRUCTURE RESEARCH",
+    "title": [
+      "Are you testing",
+      "the right fault?"
+    ],
+    "subtitle": [
+      "A standard and linter for",
+      "AI-cluster fault-injection fidelity."
+    ],
+    "fontSize": 58,
+    "background": "illustration-v2.png",
+    "output": ".",
+    "source_readme_commit": "46cec45477d8a1c8afca1d49bdee39dc0fb99844"
+  }
+]
