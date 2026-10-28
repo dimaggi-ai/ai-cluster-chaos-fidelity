@@ -333,7 +333,10 @@ def test_load_surge_via_httpchaos_or_pod_kill_rejected():
 def test_load_surge_wording_variants_are_caught():
     for fault in ("traffic spike on the router", "surge in traffic after an outage",
                   "flash crowd on a new model", "thundering herd of reconnecting clients",
-                  "QPS burst during a launch"):
+                  "QPS burst during a launch",
+                  # extra whitespace must not slip past the rule (Codex QA 2026-10-28)
+                  "load  surge on the router", "load\tsurge", "traffic   spike",
+                  "surge  in  traffic", "burst\nof\nrequests"):
         s = _spec(wanted_fault=fault,
                   injection={"tool": "Chaos Mesh", "technique": "httpchaos"})
         errs = validate_spec(s, "t")

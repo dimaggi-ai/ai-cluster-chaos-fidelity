@@ -191,8 +191,8 @@ FIDELITY_RULES = [
         "retires the wrong risk in the wrong quarter",
     ),
     (
-        r"(\b(load|traffic|requests?|qps|rps|demand)[\s_-]?(surge|spike|burst|flood)"
-        r"|\b(surge|spike|burst|flood)s? (of|in) (load|traffic|requests|demand)\b"
+        r"(\b(load|traffic|requests?|qps|rps|demand)[\s_-]*(surge|spike|burst|flood)"
+        r"|\b(surge|spike|burst|flood)s?\s+(of|in)\s+(load|traffic|requests|demand)\b"
         r"|flash.?crowd|thundering.?herd)",
         {"load-replay"},
         "a load surge is a DEMAND fault: every component stays healthy and "
