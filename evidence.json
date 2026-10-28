@@ -87,11 +87,11 @@
     },
     {
       "path": "catalog/validate.py",
-      "sha256": "f575cd6b17570688aa1d790b07bbd3542bf73283cc549622b9f7c0e3c75f495b"
+      "sha256": "b151c3d040531e0e7a08cb992fd49c261e07c581230ec0f11fa49f58ac62233e"
     },
     {
       "path": "SPEC.md",
-      "sha256": "92a565cb5b5a62abf783aaaa8e770c14bcd3bcbd94d01a9532f986396397784a"
+      "sha256": "460e0e0be238c1d005b2e9005c92c48f1043d7d9754ec018f6795dfdb38e1ed3"
     }
   ]
 }
