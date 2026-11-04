@@ -42,6 +42,10 @@ Chaos Mesh `NetworkChaos` applies tc/netem inside the pod's network namespace [1
 
 There is a subtler version of this same error, and the standard catches it: **`tc`/`netem` on the host RDMA NIC still does not reach the collective.** RDMA is kernel-bypass — the verbs path goes straight from the HCA to user memory, around the kernel network stack that `tc`/`netem` (whether via `NetworkChaos` or Chaosd) operates on. So "Chaosd on the RDMA NIC" injects an *IP-path* fault, not a fabric fault; an AllReduce sails through it. To actually fault the collective's path you need a real link fault — a switch port bounce, `ibportstate` disable, or a vendor link-disable (`ib-link-down` in the catalog). That requires hardware and switch access, which is why it stays hardware-only and `agent_forbidden`. The [`ip-bootstrap-delay`](../catalog/experiments/ip-bootstrap-delay.yaml) and [`ib-link-flap`](../catalog/experiments/ib-link-flap.yaml) specs are deliberately paired to make the distinction concrete. This is the experiment people skip and then lose a week of training to, and it is the one where getting the *technique* wrong silently certifies nothing.
 
+The same holds for **RoCE** (v1 or v2) and anything described at the **verbs** or **GPUDirect RDMA** level: RoCE carries RDMA over Ethernet, but the transfer is still kernel-bypass, so `tc`/`netem` on that NIC misses it exactly as it misses InfiniBand. The validator therefore treats `RoCE`, `RoCEv1`, `RoCEv2`, `verbs` and `GPUDirect RDMA` in `wanted_fault` like `InfiniBand`. It deliberately does **not** match NCCL socket bootstrap or GPUDirect *Storage*, which are not RDMA link faults.
+
+This classifier is conservative text lint over the `wanted_fault` sentence. A match means "this wording names a fabric fault, so a kernel-path technique cannot certify it"; a non-match is not proof that the injection and the wanted fault are physically equivalent. Fidelity still rests on the reviewer reading the spec.
+
 ### A DCGM field injection is not a physical fault
 
 DCGM error injection [6] writes a value into a DCGM field so the health watches and policies fire exactly as they would on a real ECC, PCIe, or thermal event. That is genuinely useful — it certifies the **telemetry → remediation control loop** (does the cordon/drain fire on a *reported* fault?), which is the loop you promote to autonomy. But be precise about what it does *not* establish: it does not create a real uncorrectable HBM error, a real XID 79, a stuck CUDA context, or — critically — a silent computational error that emits no telemetry at all. The catalog's DCGM specs say this in their `certifies` field ("the reaction to a *reported* fault, not survival of a real one"), and the taxonomy states the principle: **an injection certifies the layer it touches, and DCGM injection touches the telemetry plane, not device physics.** Certifying "we cordon on a reported ECC" is real and valuable; claiming it certifies "we survive HBM failure" or "we catch SDC" is the same category error in a lab coat.
@@ -116,7 +120,7 @@ uncorrectable ECC       dcgm-inject / gpu-burn          overlay packet loss, pod
 GPU off bus (XID 79)    dcgm-inject (reported) — real   any inject that leaves NVML up and calls it "off bus"
                         one is lab/physical
 rank death              pod-kill / process-kill         NetworkChaos on eth0
-IB / rail flap          ib-link-down (switch/port/      tc/netem on the NIC (chaosd-nic
+IB / RoCE / rail flap   ib-link-down (switch/port/      tc/netem on the NIC (chaosd-nic
                         ibportstate) — real link fault  or overlay) — RDMA bypasses it
 CPU desync timeout      cpu-sleep (GPU stays healthy)   gpu reset / device inject
 bad checkpoint          iochaos fault/mistake on ckpt   pod memory stress

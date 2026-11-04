@@ -25,6 +25,7 @@ Exit code 0 = all valid; 1 = at least one invalid.
 
 from __future__ import annotations
 
+import math
 import re
 import sys
 from pathlib import Path
@@ -102,11 +103,42 @@ REQUIRED_INJECTION_FIELDS = ("tool", "technique")
 # The demo rule: these four make an experiment an experiment.
 DEMO_FIELDS = ("owner", "duration", "abort", "undo")
 
+# One positive number and one unit. No maximum: a long cap is a planning
+# question, not a lint error, and a passing duration authorizes nothing.
+DURATION_RE = re.compile(r"\s*(\d+(?:\.\d+)?|\.\d+)\s*(ms|s|m|h|d)\s*")
+DURATION_SECONDS = {"ms": 0.001, "s": 1, "m": 60, "h": 3600, "d": 86400}
+
+# An undo that is only one of these (after case/punctuation folding) names
+# no automated restore path. The validator records the declaration; it
+# cannot prove the restore works.
+MANUAL_ONLY_UNDO = {
+    "manual", "manually", "manual restore", "manual undo", "by hand",
+    "operator", "operator restores", "tbd", "todo", "n a", "na", "none",
+    "unknown", "?",
+}
+
+
+def duration_seconds(value) -> float | None:
+    """Seconds for a well-formed positive, representable duration, else None."""
+    if not isinstance(value, str):
+        return None
+    m = DURATION_RE.fullmatch(value)
+    if not m:
+        return None
+    try:
+        seconds = float(m.group(1)) * DURATION_SECONDS[m.group(2)]
+    except OverflowError:
+        return None
+    if not math.isfinite(seconds) or seconds <= 0:
+        return None
+    return seconds
+
 # ------------------------------------------------------------- fidelity lint
 # (wanted_fault regex, allowed techniques, message when violated)
 FIDELITY_RULES = [
     (
-        r"(rdma|infiniband|\bib\b|rail|nvlink|fabric|leaf|spine|\btor\b)",
+        r"(rdma|infiniband|\bib\b|\broce(v[12])?\b|gpudirect[ -]?rdma|\bverbs\b|"
+        r"rail|nvlink|fabric|leaf|spine|\btor\b)",
         {"ib-link-down"},
         "an RDMA/fabric fault must hit the collective's actual data path with a "
         "real link fault (ib-link-down: switch/port/ibportstate). tc/netem "
@@ -281,6 +313,15 @@ def validate_spec(spec: dict, fname: str) -> list[str]:
 
     if not re.search(r"\d", str(spec["duration"])):
         _err(errors, name, "duration must carry a numeric cap (e.g. '3m')")
+    elif duration_seconds(spec["duration"]) is None:
+        _err(errors, name, "duration must be one positive, finite number with "
+             "a unit (ms, s, m, h or d), e.g. '3m'")
+
+    undo = re.sub(r"[\s.;:!/-]+", " ", str(spec["undo"]).lower()).strip()
+    if undo in MANUAL_ONLY_UNDO:
+        _err(errors, name, "undo must name the automated restore path; a "
+             "manual-only or placeholder undo is a demo (the validator records "
+             "the declaration; it does not prove the restore works)")
 
     ac = spec.get("autonomy_class")
     if ac is not None and ac not in VALID_AUTONOMY:
