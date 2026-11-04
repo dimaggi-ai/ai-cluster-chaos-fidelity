@@ -382,6 +382,84 @@ def test_existing_catalog_untouched_by_the_load_rule():
         assert spec["injection"]["technique"] != "load-replay", p.name
 
 
+
+# --- task102: RoCE/verbs fidelity, manual-only undo, duration form ---------
+# The fidelity rule is conservative text lint over wanted_fault; it is not
+# proof that two faults are physically equivalent.
+
+def _fidelity_errs(wanted, technique, layer="fabric"):
+    s = _spec(wanted_fault=wanted, layer=layer,
+              injection={"tool": "t", "technique": technique})
+    return [e for e in validate_spec(s, "t") if "FIDELITY" in e]
+
+
+def test_roce_and_verbs_faults_need_a_real_link_fault():
+    for wanted in ("RoCEv2 link flap on GPU NIC", "RoCEv1 link flap on GPU NIC",
+                   "RoCE link flap on GPU NIC", "RoCE v1 link flap on GPU NIC",
+                   "verbs queue-pair errors on GPU NIC",
+                   "GPUDirect RDMA path loss", "InfiniBand link flap on GPU NIC"):
+        for wrong in ("chaosd-nic", "networkchaos-overlay"):
+            assert _fidelity_errs(wanted, wrong), (wanted, wrong)
+        assert not _fidelity_errs(wanted, "ib-link-down"), wanted
+
+
+def test_ip_path_faults_stay_outside_the_rdma_rule():
+    """Negative controls: NCCL socket bootstrap, GPUDirect Storage and words
+    that merely contain the letters 'roce' are not RDMA link faults."""
+    for wanted, technique in (
+            ("NCCL socket bootstrap delay on the TCP rendezvous path", "chaosd-nic"),
+            ("GPUDirect Storage read errors", "iochaos"),
+            ("rendezvous procedure delay", "chaosd-nic"),
+            ("procedure v1 rollout delay", "chaosd-nic"),
+            ("slow process start", "chaosd-nic")):
+        assert not _fidelity_errs(wanted, technique), wanted
+
+
+def test_manual_only_undo_is_a_demo():
+    for undo in ("manual", "Manual.", "TBD", "none", "N/A", "by hand",
+                 "operator restores", "  unknown  ", "?"):
+        errs = validate_spec(_spec(undo=undo), "t")
+        assert errs and "undo must name the automated restore path" in errs[0], undo
+        assert "does not prove the restore works" in errs[0], undo
+
+
+def test_undo_that_names_an_automated_step_passes():
+    """Accepted undo text is a declaration, not restoration proof; a sentence
+    naming an automated step passes even when it mentions manual checks. The
+    filter only catches manual-only/placeholder tokens: free text that names
+    no step at all (e.g. 'a banana') is recorded as declared, not judged."""
+    for undo in ("delete chaos resource", "a banana",
+                 "automated port re-enable; manual verification of BER",
+                 "none needed if the deny holds; that is the point"):
+        assert validate_spec(_spec(undo=undo), "t") == [], undo
+
+
+def test_duration_accepts_one_positive_number_with_a_unit_and_no_maximum():
+    for d in ("3m", "1.5h", "0.5s", ".5s", "250ms", "3 m", "9999d"):
+        assert validate_spec(_spec(duration=d), "t") == [], d
+
+
+def test_duration_refuses_zero_negative_malformed_and_multiple():
+    for d in ("0s", "0.0m", "-3m", "1 forever", "3m then until healthy",
+              "3m 2s", "3", "3M", "1e3s", "inf s", "nan s", 30, 1.5, True):
+        errs = validate_spec(_spec(duration=d), "t")
+        assert errs and "duration" in errs[0], d
+
+
+def test_duration_refuses_values_that_overflow_on_conversion():
+    """No maximum is invented, but a cap must be representable in seconds:
+    a digit string that converts to infinity is refused, not waved through."""
+    try:
+        from .validate import duration_seconds
+    except ImportError:
+        from validate import duration_seconds
+    huge = "9" * 400
+    for d in (huge + "s", huge + "d", huge + ".5ms"):
+        assert duration_seconds(d) is None, d[-6:]
+        errs = validate_spec(_spec(duration=d), "t")
+        assert errs and "finite" in errs[0], d[-6:]
+    assert duration_seconds("9999d") == 9999 * 86400
+
 if __name__ == "__main__":
     for fn in sorted(k for k in dir() if k.startswith("test_")):
         globals()[fn]()
