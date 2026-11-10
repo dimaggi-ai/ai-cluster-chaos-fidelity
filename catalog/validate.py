@@ -109,12 +109,12 @@ DURATION_RE = re.compile(r"\s*(\d+(?:\.\d+)?|\.\d+)\s*(ms|s|m|h|d)\s*")
 DURATION_SECONDS = {"ms": 0.001, "s": 1, "m": 60, "h": 3600, "d": 86400}
 
 # An undo that is only one of these (after case/punctuation folding) names
-# no automated restore path. The validator records the declaration; it
-# cannot prove the restore works.
+# no automated restore path. So does one that folds to nothing ("-", "...").
+# The validator records the declaration; it cannot prove the restore works.
 MANUAL_ONLY_UNDO = {
-    "manual", "manually", "manual restore", "manual undo", "by hand",
-    "operator", "operator restores", "tbd", "todo", "n a", "na", "none",
-    "unknown", "?",
+    "manual", "manually", "manual only", "manual operator", "manual restore",
+    "manual undo", "by hand", "operator", "operator restores", "tbd", "todo",
+    "n a", "na", "none", "unknown", "?",
 }
 
 
@@ -317,8 +317,8 @@ def validate_spec(spec: dict, fname: str) -> list[str]:
         _err(errors, name, "duration must be one positive, finite number with "
              "a unit (ms, s, m, h or d), e.g. '3m'")
 
-    undo = re.sub(r"[\s.;:!/-]+", " ", str(spec["undo"]).lower()).strip()
-    if undo in MANUAL_ONLY_UNDO:
+    undo = re.sub(r"[\s.,;:!/-]+", " ", str(spec["undo"]).lower()).strip()
+    if not undo or undo in MANUAL_ONLY_UNDO:
         _err(errors, name, "undo must name the automated restore path; a "
              "manual-only or placeholder undo is a demo (the validator records "
              "the declaration; it does not prove the restore works)")
