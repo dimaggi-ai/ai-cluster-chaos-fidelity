@@ -20,3 +20,7 @@ jobs:
           cd catalog
           python3 coverage.py
           python3 test_coverage.py
+      - name: Disconnection drill plans (plan-only)
+        run: |
+          python3 drills/validate_plan.py drills/plans/vendor-severance-72h.yaml
+          python3 -m unittest discover -s drills -p test_validate_plan.py
