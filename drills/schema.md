@@ -38,7 +38,11 @@ Each role must have a different `reference` (compared ignoring case and surround
 | Items in any list or mapping | 32 | `too_many_items` |
 | Nesting depth | 8 | `too_deep` |
 | String length | 2000 characters | `string_too_long` |
-| Integer magnitude | 10^15 | `number_out_of_range` |
+| Key length | 64 characters | `key_too_long` |
+| Integer magnitude | 10^15 (literals too long for Python to convert: `yaml_value`) | `number_out_of_range` |
+| Window years, after conversion to UTC | 2000 to 2100 | `time_out_of_range` |
+
+`validate_plan.py PATH` reads regular files only. FIFOs, devices, sockets and directories are refused before they are opened (`not_regular_file`). The open is non-blocking and must reach the same file that was checked (`file_changed`). The read stops one byte past 64 KiB, so a file that grows after the size check is refused (`file_too_large`). If an input ever reaches an unexpected error, the report is still JSON, with `internal_error`; no test input reaches it.
 
 The loader is PyYAML's `SafeLoader` with three changes: duplicate keys are refused (`duplicate_key`), anchors and aliases are refused (`yaml_anchor`, `yaml_alias`), and unquoted timestamps stay text so the validator parses them itself. `.inf` and `.nan` are refused (`nonfinite`). Language-specific tags fail to load (`yaml_syntax`). Exactly one document is allowed (`yaml_documents`). The file must be UTF-8 (`encoding`) and mapping keys must be strings (`key_type`).
 
@@ -66,4 +70,4 @@ The loader is PyYAML's `SafeLoader` with three changes: duplicate keys are refus
 
 ## Reason codes
 
-`schema_version`, `mode`, `missing`, `unknown_field`, `executable_field`, `result_field`, `shape`, `text`, `number`, `not_positive`, `list`, `boolean`, `duplicate_id`, `environment`, `production_refused`, `scenario`, `plane`, `link_conflict`, `time`, `window_order`, `duration_mismatch`, `duration_too_long`, `comparator`, `role_not_human`, `roles_not_distinct`, `check_not_independent`, `role_undeclared`, `evidence_template`, plus the input-limit and loader codes above and `unreadable`.
+`schema_version`, `mode`, `missing`, `unknown_field`, `executable_field`, `result_field`, `shape`, `text`, `number`, `not_positive`, `list`, `boolean`, `duplicate_id`, `environment`, `production_refused`, `scenario`, `plane`, `link_conflict`, `time`, `window_order`, `duration_mismatch`, `duration_too_long`, `comparator`, `role_not_human`, `roles_not_distinct`, `check_not_independent`, `role_undeclared`, `evidence_template`, `time_out_of_range`, plus the input-limit and loader codes above, `not_regular_file`, `file_changed`, `unreadable` and `internal_error`.

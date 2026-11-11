@@ -1,6 +1,11 @@
 """Tests for the plan-only drill validator. Run: python3 -m unittest discover -s drills -p test_validate_plan.py"""
 
+import ast
 from contextlib import redirect_stderr, redirect_stdout
+import os
+import stat
+import tempfile
+import threading
 import copy
 import hashlib
 import io
@@ -319,13 +324,152 @@ class Safety(unittest.TestCase):
                 self.assertEqual(codes(report), ["result_field"])
 
     def test_no_execution_or_network_imports(self):
-        source = (HERE / "validate_plan.py").read_text()
-        for name in ("subprocess", "socket", "urllib", "http.client", "requests", "os.system", "eval(", "exec("):
-            self.assertNotIn(name, source)
+        tree = ast.parse((HERE / "validate_plan.py").read_text())
+        imported = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported.update(alias.name.split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                imported.add((node.module or "").split(".")[0])
+        self.assertEqual(imported, {"__future__", "datetime", "hashlib", "json", "math", "os", "pathlib",
+                                    "stat", "sys", "yaml"})
+        called = {node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", None)
+                  for node in ast.walk(tree) if isinstance(node, ast.Call)}
+        for name in ("eval", "exec", "compile", "system", "popen", "spawnv", "execv", "fork", "__import__",
+                     "unsafe_load", "full_load"):
+            self.assertNotIn(name, called)
+        os_calls = {node.func.attr for node in ast.walk(tree) if isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute) and getattr(node.func.value, "id", None) == "os"}
+        self.assertEqual(os_calls, {"stat", "open", "fstat", "read", "close"})
 
     def test_unreadable_path(self):
         report = v.validate_path(HERE / "plans" / "does-not-exist.yaml")
         self.assertEqual((report["status"], codes(report)), (v.INVALID, ["unreadable"]))
+
+
+class CodexReview5bcd360(unittest.TestCase):
+    """Regressions for Codex's isolated review of 5bcd360: every input gets a JSON refusal, never a traceback or a hang."""
+
+    def assert_refused(self, report, code):
+        self.assertEqual((report["status"], codes(report)), (v.INVALID, [code]), report["reasons"])
+        json.dumps(report, allow_nan=False)  # always serialisable
+        self.assertLess(len(json.dumps(report)), 4096)  # bounded: no input is echoed at length
+
+    def test_integer_past_python_conversion_limit(self):
+        data = EXAMPLE.read_bytes().replace(b"threshold: 5\n", b"threshold: " + b"9" * 5000 + b"\n")
+        self.assertLess(len(data), v.MAX_FILE_BYTES)
+        self.assert_refused(v.validate_bytes(data), "yaml_value")
+
+    def test_integer_under_conversion_limit_still_out_of_range(self):
+        data = EXAMPLE.read_bytes().replace(b"threshold: 5\n", b"threshold: " + b"9" * 4000 + b"\n")
+        self.assert_refused(v.validate_bytes(data), "number_out_of_range")
+
+    def test_huge_integer_via_cli_gives_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "huge.yaml"
+            path.write_bytes(EXAMPLE.read_bytes().replace(b"threshold: 5\n", b"threshold: " + b"9" * 5000 + b"\n"))
+            code, out = Cli.call(self, [str(path)])
+        self.assertEqual(code, 1)
+        self.assertEqual(codes(json.loads(out)["reports"][0]), ["yaml_value"])
+
+    def test_times_that_overflow_when_converted_to_utc(self):
+        for key, value in (("start", "0001-01-01T00:30:00+23:00"), ("end", "9999-12-31T23:30:00-23:00")):
+            with self.subTest(value=value):
+                plan = example_plan()
+                plan["window"][key] = value
+                self.assert_refused(run(plan), "time_out_of_range")
+
+    def test_times_outside_supported_years(self):
+        for start, end in (("1999-12-01T09:00:00Z", "1999-12-04T09:00:00Z"),
+                           ("2101-12-01T09:00:00Z", "2101-12-04T09:00:00Z")):
+            with self.subTest(start=start):
+                plan = example_plan()
+                plan["window"].update(start=start, end=end)
+                report = run(plan)
+                self.assertEqual(codes(report), ["time_out_of_range", "time_out_of_range"])
+
+    def test_named_pipe_is_refused_without_blocking(self):
+        if not hasattr(os, "mkfifo"):
+            self.skipTest("no FIFOs on this platform")
+        with tempfile.TemporaryDirectory() as tmp:
+            fifo = Path(tmp) / "plan.yaml"
+            os.mkfifo(fifo)
+            box = {}
+            worker = threading.Thread(target=lambda: box.update(report=v.validate_path(fifo)), daemon=True)
+            worker.start()
+            worker.join(timeout=2)
+            if worker.is_alive():  # unblock the reader so the test process can still exit
+                fd = os.open(fifo, os.O_WRONLY | os.O_NONBLOCK)
+                os.close(fd)
+                self.fail("validate_path blocked on a FIFO")
+        self.assert_refused(box["report"], "not_regular_file")
+
+    def test_devices_and_directories_are_not_opened(self):
+        for path in (Path(os.devnull), HERE / "plans"):
+            with self.subTest(path=str(path)):
+                self.assert_refused(v.validate_path(path), "not_regular_file")
+
+    def test_file_that_grows_after_the_size_check(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "growing.yaml"
+            path.write_bytes(b"#" * (v.MAX_FILE_BYTES + 100))
+            real_stat = os.stat
+
+            def stale_stat(p, *args, **kwargs):  # the size seen before the file grew
+                fields = list(real_stat(p, *args, **kwargs))
+                fields[stat.ST_SIZE] = 10
+                return os.stat_result(fields)
+
+            original = v.os.stat
+            v.os.stat = stale_stat
+            try:
+                report = v.validate_path(path)
+            finally:
+                v.os.stat = original
+        self.assert_refused(report, "file_too_large")
+
+    def test_file_swapped_between_check_and_open(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            other = Path(tmp) / "other.yaml"
+            other.write_bytes(b"a: 1\n")
+            original = v.os.stat
+            v.os.stat = lambda p, *a, **k: original(other)
+            try:
+                report = v.validate_path(EXAMPLE)
+            finally:
+                v.os.stat = original
+        self.assert_refused(report, "file_changed")
+
+    def test_long_explicit_key(self):
+        data = b"? " + b"k" * 3000 + b"\n: value\n"
+        self.assert_refused(v.validate_bytes(data), "key_too_long")
+
+    def test_key_just_over_limit(self):
+        plan = example_plan()
+        plan["k" * (v.MAX_KEY + 1)] = "x"
+        self.assert_refused(run(plan), "key_too_long")
+        plan = example_plan()
+        plan["k" * v.MAX_KEY] = "x"
+        self.assertEqual(codes(run(plan)), ["unknown_field"])
+
+    def test_corrected_inputs_recover_to_valid(self):
+        good = EXAMPLE.read_bytes()
+        broken = {
+            "huge integer": good.replace(b"threshold: 5\n", b"threshold: " + b"9" * 5000 + b"\n"),
+            "overflowing time": good.replace(b'start: "2026-12-01T09:00:00Z"', b'start: "0001-01-01T00:30:00+23:00"'),
+            "long key": good.replace(b"evidence:\n", b"? " + b"k" * 3000 + b"\n: x\nevidence:\n"),
+        }
+        for name, data in broken.items():
+            with self.subTest(name=name):
+                self.assertEqual(v.validate_bytes(data)["status"], v.INVALID)
+        self.assertEqual(v.validate_bytes(good)["status"], v.VALID)
+
+    def test_no_regression_reaches_the_internal_error_fallback(self):
+        inputs = [b"9" * 5000, b"a: " + b"9" * 5000, b"? " + b"k" * 3000 + b"\n: v\n",
+                  b"window: {start: '0001-01-01T00:30:00+23:00'}\n"]
+        for data in inputs:
+            with self.subTest(data=data[:20]):
+                self.assertNotIn("internal_error", codes(v.validate_bytes(data)))
 
 
 class Cli(unittest.TestCase):

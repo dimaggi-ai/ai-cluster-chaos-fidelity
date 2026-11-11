@@ -22,7 +22,9 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
+import stat
 import sys
 
 import yaml
@@ -37,6 +39,8 @@ MAX_FILE_BYTES = 64 * 1024
 MAX_ITEMS = 32          # any list or mapping
 MAX_DEPTH = 8
 MAX_STRING = 2000
+MAX_KEY = 64            # field names are short identifiers
+MIN_YEAR, MAX_YEAR = 2000, 2100  # UTC years a drill window may use
 MAX_DURATION_HOURS = 744  # 31 days: a plan, not a survival claim
 DURATION_TOLERANCE_HOURS = 1e-9
 
@@ -107,6 +111,9 @@ def _construct_mapping(self, node, deep=False):
         key = self.construct_object(key_node, deep=True)
         if not isinstance(key, str):
             raise _Reject("", "key_type", f"mapping keys must be strings (line {key_node.start_mark.line + 1})")
+        if len(key) > MAX_KEY:
+            raise _Reject("", "key_too_long",
+                          f"a key is {len(key)} characters; the limit is {MAX_KEY} (line {key_node.start_mark.line + 1})")
         if key in seen:
             raise _Reject("", "duplicate_key", f"duplicate key {key!r} (line {key_node.start_mark.line + 1})")
         seen.add(key)
@@ -133,6 +140,9 @@ def _load(data: bytes):
         raise _Reject("", "yaml_syntax", f"not valid YAML: {exc.__class__.__name__}") from exc
     except RecursionError as exc:
         raise _Reject("", "too_deep", "plan nests too deeply") from exc
+    except (ValueError, OverflowError) as exc:
+        # For example an integer literal longer than Python's conversion limit.
+        raise _Reject("", "yaml_value", f"a value cannot be read safely: {exc.__class__.__name__}") from exc
     if len(docs) != 1:
         raise _Reject("", "yaml_documents", f"expected exactly one YAML document, found {len(docs)}")
     return docs[0]
@@ -147,6 +157,8 @@ def _bounds(value, path="", depth=0):
         if len(value) > MAX_ITEMS:
             raise _Reject(where, "too_many_items", f"{len(value)} fields; the limit is {MAX_ITEMS}")
         for key, item in value.items():
+            if not isinstance(key, str) or len(key) > MAX_KEY:
+                raise _Reject(where, "key_too_long", f"keys must be text of at most {MAX_KEY} characters")
             _bounds(item, f"{path}.{key}" if path else key, depth + 1)
     elif isinstance(value, list):
         if len(value) > MAX_ITEMS:
@@ -241,16 +253,22 @@ class _Checker:
 
 
 def _utc(value):
-    """Aware ISO 8601 time -> UTC datetime; None if naive or malformed."""
+    """Aware ISO 8601 time -> UTC datetime, or a (code, message) refusal."""
     if not isinstance(value, str) or "T" not in value:
-        return None
+        return ("time", "must be an ISO 8601 date and time with a UTC offset (for example 2026-12-01T09:00:00Z)")
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00") if value.endswith("Z") else value)
     except ValueError:
-        return None
+        return ("time", "must be an ISO 8601 date and time with a UTC offset (for example 2026-12-01T09:00:00Z)")
     if parsed.tzinfo is None or parsed.utcoffset() is None:
-        return None
-    return parsed.astimezone(timezone.utc)
+        return ("time", "must include a UTC offset (for example Z or +02:00)")
+    try:
+        utc = parsed.astimezone(timezone.utc)
+    except (OverflowError, ValueError):
+        return ("time_out_of_range", "converting this time to UTC leaves the supported date range")
+    if not MIN_YEAR <= utc.year <= MAX_YEAR:
+        return ("time_out_of_range", f"the UTC year must be between {MIN_YEAR} and {MAX_YEAR}")
+    return utc
 
 
 def _check(plan) -> list[dict]:
@@ -303,12 +321,17 @@ def _check(plan) -> list[dict]:
 
     win = c.fields(top.get("window", _ABSENT), "window", ("start", "end", "duration_hours"))
     if win is not None:
-        start = _utc(win.get("start")) if "start" in win else None
-        end = _utc(win.get("end")) if "end" in win else None
-        if "start" in win and start is None:
-            c.fail("window.start", "time", "must be an ISO 8601 time with a UTC offset (for example 2026-12-01T09:00:00Z)")
-        if "end" in win and end is None:
-            c.fail("window.end", "time", "must be an ISO 8601 time with a UTC offset")
+        start = end = None
+        for key in ("start", "end"):
+            if key not in win:
+                continue
+            parsed = _utc(win[key])
+            if isinstance(parsed, tuple):
+                c.fail(f"window.{key}", *parsed)
+            elif key == "start":
+                start = parsed
+            else:
+                end = parsed
         hours = c.number(win, "duration_hours", "window.duration_hours")
         if start and end:
             span = (end - start).total_seconds() / 3600
@@ -400,6 +423,12 @@ def plan_digest(plan) -> str:
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
+def _file_refusal(name: str, code: str, message: str) -> dict:
+    return {"report_version": REPORT_VERSION, "file": name, "file_sha256": None, "plan_sha256": None,
+            "status": INVALID, "limitations": list(LIMITATIONS),
+            "reasons": [{"path": "(file)", "code": code, "message": message}]}
+
+
 def validate_bytes(data: bytes, name: str = "<input>") -> dict:
     report = {"report_version": REPORT_VERSION, "file": name,
               "file_sha256": hashlib.sha256(data).hexdigest(), "plan_sha256": None,
@@ -407,30 +436,62 @@ def validate_bytes(data: bytes, name: str = "<input>") -> dict:
     try:
         plan = _load(data)
         _bounds(plan)
+        digest = plan_digest(plan)
+        reasons = _check(plan)
     except _Reject as exc:
         report["reasons"] = [{"path": exc.path or "(file)", "code": exc.code, "message": exc.message}]
         return report
-    report["plan_sha256"] = plan_digest(plan)
-    reasons = _check(plan)
+    except Exception as exc:  # last line of defence: a refusal, never a traceback
+        report["reasons"] = [{"path": "(file)", "code": "internal_error",
+                              "message": f"the validator could not check this input: {exc.__class__.__name__}"}]
+        return report
+    report["plan_sha256"] = digest
     report["reasons"] = sorted(reasons, key=lambda r: (r["path"], r["code"], r["message"]))
     report["status"] = INVALID if reasons else VALID
     return report
 
 
+def _read_regular_file(path: Path) -> bytes:
+    """Read at most MAX_FILE_BYTES from a regular file; never open FIFOs, devices or sockets.
+
+    The type is checked before opening. The open is non-blocking, and the opened
+    descriptor must be the same regular file that was checked, so a file swapped for
+    a FIFO in between cannot block. The read stops one byte past the limit, so a file
+    that grows after the check is refused rather than read without bound.
+    """
+    before = os.stat(path)
+    if not stat.S_ISREG(before.st_mode):
+        raise _Reject("(file)", "not_regular_file", "plans must be regular files; FIFOs, devices and sockets are not opened")
+    if before.st_size > MAX_FILE_BYTES:
+        raise _Reject("(file)", "file_too_large", f"plan is {before.st_size} bytes; the limit is {MAX_FILE_BYTES}")
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOCTTY", 0)
+    fd = os.open(path, flags)
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode) or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+            raise _Reject("(file)", "file_changed", "the file changed between checking and opening it")
+        chunks, total = [], 0
+        while total <= MAX_FILE_BYTES:
+            chunk = os.read(fd, MAX_FILE_BYTES + 1 - total)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+        if total > MAX_FILE_BYTES:
+            raise _Reject("(file)", "file_too_large", f"plan grew past the {MAX_FILE_BYTES}-byte limit while being read")
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
+
+
 def validate_path(path) -> dict:
     path = Path(path)
     try:
-        size = path.stat().st_size
-        if size > MAX_FILE_BYTES:
-            return {"report_version": REPORT_VERSION, "file": path.name, "file_sha256": None,
-                    "plan_sha256": None, "status": INVALID, "limitations": list(LIMITATIONS),
-                    "reasons": [{"path": "(file)", "code": "file_too_large",
-                                 "message": f"plan is {size} bytes; the limit is {MAX_FILE_BYTES}"}]}
-        data = path.read_bytes()
+        data = _read_regular_file(path)
+    except _Reject as exc:
+        return _file_refusal(path.name, exc.code, exc.message)
     except OSError as exc:
-        return {"report_version": REPORT_VERSION, "file": path.name, "file_sha256": None,
-                "plan_sha256": None, "status": INVALID, "limitations": list(LIMITATIONS),
-                "reasons": [{"path": "(file)", "code": "unreadable", "message": exc.__class__.__name__}]}
+        return _file_refusal(path.name, "unreadable", exc.__class__.__name__)
     return validate_bytes(data, path.name)
 
 
