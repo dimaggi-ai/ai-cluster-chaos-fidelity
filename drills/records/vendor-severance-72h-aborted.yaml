@@ -1,0 +1,82 @@
+# Synthetic example. Nobody ran this drill; every value is invented to show the shape.
+# An aborted drill whose restoration check failed is still a complete record.
+# Status expected: evidence_complete_not_judged. The outcome stays "aborted"; nothing is upgraded.
+schema_version: drill-record/v1
+record_id: vendor-severance-72h-example-record-2
+synthetic: true
+plan:
+  plan_id: vendor-severance-72h-example
+  plan_sha256: c299b94ce2326a174a1ab561ec57bc4fdc8a504e5e1ce531ee897f4ef76a8914
+  file_sha256: 5022bc45ba12ae1cc7e6afd5f6ca54730a383518b08feccb0412ddffbc3004cf
+  validator_status: plan_valid_not_run
+window:
+  start: "2026-12-01T09:00:00Z"
+  end: "2026-12-04T09:00:00Z"
+sign_offs:
+  approver:
+    reference: approver@example.invalid
+    confirmed_how: Synthetic placeholder for how the approval was confirmed (ticket reference).
+    at: "2026-11-30T16:00:00Z"
+  operator:
+    reference: operator@example.invalid
+    confirmed_how: Synthetic placeholder for the operator's acknowledgement.
+    at: "2026-11-30T16:30:00Z"
+  verifier:
+    reference: verifier@example.invalid
+    confirmed_how: Synthetic placeholder for the verifier's acknowledgement.
+    at: "2026-11-30T17:00:00Z"
+timeline:
+  preconditions_confirmed: "2026-12-01T08:30:00Z"
+  links_severed: "2026-12-01T09:00:00Z"
+  ended: "2026-12-02T14:20:00Z"
+  restore_started: "2026-12-02T14:22:00Z"
+  restore_finished: "2026-12-02T15:41:00Z"
+preconditions:
+  - id: pre-backup
+    state: confirmed
+    reference: synthetic-ref-backup-1
+  - id: pre-staging-only
+    state: confirmed
+    reference: synthetic-ref-approval-1
+  - id: pre-rollback-rehearsed
+    state: confirmed
+abort_criteria:
+  - id: abort-error-rate
+    observed_extreme: 1.8
+    crossed: false
+    response: none
+  - id: abort-node-unready
+    observed_extreme: 3
+    crossed: true
+    response: Operator stopped the drill and started the restore procedure.
+  - id: abort-cert-expiry
+    observed_extreme: 310
+    crossed: false
+    response: none
+recovery_checks:
+  - id: check-links-back
+    checked_by_role: verifier
+    checked_by_reference: verifier@example.invalid
+    state: verified
+    at: "2026-12-02T15:45:00Z"
+    reference: synthetic-ref-health-1
+  - id: check-workloads
+    checked_by_role: verifier
+    checked_by_reference: verifier@example.invalid
+    state: not_verified
+    at: "2026-12-02T16:30:00Z"
+    reference: synthetic-ref-dashboard-1
+  - id: check-signoff
+    checked_by_role: approver
+    checked_by_reference: approver@example.invalid
+    state: verified
+    at: "2026-12-02T18:00:00Z"
+    reference: synthetic-ref-review-1
+deviations:
+  - description: Restore took longer than the plan's 60-minute limit because one node needed a manual reboot.
+coverage_gaps:
+  - No customer workloads were present on staging, so tenant-facing effects were not observed.
+  - The licence check's grace period is longer than 72 hours, so its expiry was not reached.
+outcome:
+  declared: aborted
+  abort_criterion_id: abort-node-unready
