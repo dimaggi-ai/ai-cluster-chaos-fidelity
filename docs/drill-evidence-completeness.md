@@ -12,7 +12,8 @@ So the checker:
 
 - **Binds the record to the plan.** It checks the canonical `plan_sha256` and the exact `file_sha256`, and reports the difference. If a plan was only reformatted, its canonical digest still matches but its byte digest does not. The checker reports that as a mismatch for a person to resolve, not as a silent pass.
 - **Requires one entry per plan item:** each abort criterion, recovery check, precondition and declared role. Every missing entry is reported, not just the first.
-- **Treats `not_observed` as an honest answer that still leaves a gap.** The record is then `incomplete`. Nothing is defaulted or interpolated.
+- **Treats `not_observed` as an honest answer that still leaves a gap.** Absent evidence is also a gap. Either way the record is `incomplete`, not `invalid`: `invalid` is kept for records that cannot be read or bound to a plan, or that hold a value of the wrong type. Only the exact literal `not_observed` has this meaning; other prose is not interpreted. Nothing is defaulted or interpolated.
+- **Records which validator produced the plan digests.** `plan.validator_source_commit` declares the `validate_plan.py` commit. It is echoed, never verified.
 - **Keeps observations of the drill inside the plan's window.** Restoration and recovery checks may legitimately happen after the window closes. Restore time is reported against the plan's `max_restore_minutes` as a fact, not a verdict.
 - **Echoes the declared outcome and never upgrades it.** An aborted drill, or a recovery check recorded as not verified, can be a complete record.
 
@@ -37,4 +38,4 @@ python3 drills/validate_record.py drills/plans/vendor-severance-72h.yaml drills/
 python3 -m unittest discover -s drills -p test_validate_record.py
 ```
 
-The first two records are `evidence_complete_not_judged`; the second is an aborted drill with a failed recovery check. The last two are `incomplete`. All four are synthetic. CI does not run these yet: this change adds new files only, and adding a CI step would edit the shared workflow (see the pull request).
+The first two records are `evidence_complete_not_judged`; the second is an aborted drill with a failed recovery check. The last two are `incomplete`. All four are synthetic. CI runs the record tests in one additive step, "Drill evidence records (completeness, not judged)".

@@ -21,7 +21,14 @@ Exit codes: 0 = `evidence_complete_not_judged`; 1 = `invalid`, `mismatch` or `in
 
 ## Fields
 
-`not_observed` is a literal value. It means a person declares that this was not observed. It always makes the record `incomplete`, and it is never replaced by a default.
+Fields are of two kinds:
+
+- **Structure:** `schema_version`, `record_id`, the whole `plan` block, `window`, and each entry's `id`. If one is absent, the record cannot be bound to a plan, so it is `invalid` (`missing`).
+- **Evidence:** everything else that the table marks required: the sections `sign_offs`, `timeline`, `preconditions`, `abort_criteria`, `recovery_checks`, `deviations`, `coverage_gaps` and `outcome`, and every field inside them. Absent evidence is a gap, not a schema error. The record is `incomplete` (`missing_evidence`). An empty list or mapping declares nothing, so it is a gap too, reported once per plan item.
+
+`not_observed` is a literal value. It means a person declares that this was not observed. Any evidence field, or a whole evidence section, may be `not_observed`. It always makes the record `incomplete`, it is never compared with the plan, and it is never replaced by a default. Only the exact lowercase literal counts. Other prose such as "Not observed" or "n/a" is ordinary text with no special meaning.
+
+A value of the wrong type, or outside a closed set of choices, is `invalid` whether or not it is evidence.
 
 | Field | Required | Rule |
 |---|---|---|
@@ -31,14 +38,15 @@ Exit codes: 0 = `evidence_complete_not_judged`; 1 = `invalid`, `mismatch` or `in
 | `plan.plan_id` | yes | Must equal the plan's `plan_id`. |
 | `plan.plan_sha256`, `plan.file_sha256` | yes | 64 lowercase hex characters, copied from the plan validator's report. |
 | `plan.validator_status` | yes | Exactly `plan_valid_not_run`. |
+| `plan.validator_source_commit` | yes | The full git commit (40 or 64 lowercase hex characters) of the `validate_plan.py` source that produced the two digests. It is a declaration, echoed in the report as `plan.declared_validator_source_commit`. It is never checked against any repository, and it is not an attestation. Malformed is `invalid` (`commit`). |
 | `window.start`, `window.end` | yes | Aware ISO 8601 times naming the same instants as the plan's window. Any UTC offset is accepted. |
-| `sign_offs.<role>` | one per role the plan declares | `reference` (must equal the plan's reference for that role, ignoring case and surrounding spaces), `confirmed_how` (text), `at` (time or `not_observed`). |
+| `sign_offs.<role>` | one per role the plan declares | `reference` (must equal the plan's reference for that role, ignoring case and surrounding spaces), `confirmed_how` (text), `at` (time). Each may be `not_observed`. |
 | `timeline.<event>` | yes, all five | `preconditions_confirmed`, `links_severed`, `ended`, `restore_started`, `restore_finished`. Each is a time or `not_observed`. |
-| `preconditions[]` | one per plan precondition | `id`, `state` (`confirmed`, `not_confirmed` or `not_observed`), optional `reference`. |
-| `abort_criteria[]` | one per plan criterion | `id`, `observed_extreme` (number or `not_observed`), `crossed` (`true`, `false` or `not_observed`), `response` (text; `none` is allowed). |
-| `recovery_checks[]` | one per plan check | `id`, `checked_by_role` (as the plan assigns it), `checked_by_reference` (that role's plan reference, never the operator's), `state` (`verified`, `not_verified` or `not_observed`), `at` (time or `not_observed`), `reference` (text label). |
-| `deviations` | yes | The word `none`, or a non-empty list of `{description}`. |
-| `coverage_gaps` | yes | A non-empty list of text, or `none_declared`. |
+| `preconditions[]` | one per plan precondition | `id`, `state` (`confirmed`, `not_confirmed` or `not_observed`), optional `reference` (text or `not_observed`). |
+| `abort_criteria[]` | one per plan criterion | `id`, `observed_extreme` (number or `not_observed`), `crossed` (`true`, `false` or `not_observed`), `response` (text or `not_observed`; `none` is allowed text). |
+| `recovery_checks[]` | one per plan check | `id`, `checked_by_role` (as the plan assigns it), `checked_by_reference` (that role's plan reference, never the operator's), `state` (`verified`, `not_verified` or `not_observed`), `at` (time or `not_observed`), `reference` (text label). Each may be `not_observed`. |
+| `deviations` | yes | The word `none`, `not_observed`, or a non-empty list of `{description}`. |
+| `coverage_gaps` | yes | A non-empty list of text, `none_declared`, or `not_observed`. |
 | `outcome.declared` | yes | `completed_as_planned`, `aborted` or `not_run`. |
 | `outcome.abort_criterion_id` | only when `aborted` | The plan criterion that stopped the drill. |
 
@@ -76,7 +84,7 @@ Every reason found is kept. Each reason has a class. The status is the most seve
 
 1. **`invalid`:** the input cannot be read or does not follow this schema. This covers:
    - loader and limit refusals;
-   - `unknown_field`, `missing`, `shape`, `value`, `text`, `number`, `boolean`, `digest`, `time`, `time_out_of_range`, `schema_version` and `executable_field`;
+   - `unknown_field`, `missing` (structure only), `shape`, `list`, `value`, `text`, `number`, `boolean`, `digest`, `commit`, `time`, `time_out_of_range`, `schema_version` and `executable_field`;
    - an invalid plan (`plan_not_valid`, with the plan's own reasons);
    - unreadable or non-regular files;
    - `internal_error`.
@@ -85,7 +93,7 @@ Every reason found is kept. Each reason has a class. The status is the most seve
    - references: `unknown_reference`, `duplicate_reference`, `role_undeclared`, `role_reference_mismatch`, `check_role_mismatch`, `check_not_independent`;
    - timeline: `outside_window`, `timeline_order`, `check_before_restore`;
    - outcome: `outcome_conflict`.
-3. **`incomplete`:** required evidence is absent (`missing_evidence`) or declared `not_observed` (`not_observed`).
+3. **`incomplete`:** required evidence is absent or empty (`missing_evidence`), or declared `not_observed` (`not_observed`).
 4. **`evidence_complete_not_judged`:** there are no reasons.
 
 `plan_sha256_mismatch` means the record names a different plan. `file_sha256_mismatch` alone, with the message "canonical content matches", means the plan file was reformatted, re-commented or re-quoted after the record was written. Its meaning is the same, but its bytes are not. Both are mismatches, and re-recording the digests is a human decision.
@@ -99,7 +107,8 @@ Reasons are sorted by class (in the order above), then by input (`plan` before `
   "report_version": "drill-record-report/v1",
   "status": "evidence_complete_not_judged",
   "declared_outcome": "completed_as_planned",
-  "plan":   {"file": "...", "file_sha256": "...", "plan_sha256": "...", "status": "plan_valid_not_run"},
+  "plan":   {"file": "...", "file_sha256": "...", "plan_sha256": "...", "status": "plan_valid_not_run",
+             "declared_validator_source_commit": "..."},
   "record": {"file": "...", "file_sha256": "...", "record_sha256": "..."},
   "derived": {"restore_minutes": 42.0, "plan_max_restore_minutes": 60, "restore_exceeds_plan_max": false},
   "reasons": [{"class": "...", "input": "plan|record", "path": "...", "code": "...", "message": "..."}],

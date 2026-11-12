@@ -272,12 +272,247 @@ class Outcome(unittest.TestCase):
         self.assertIsNone(r["declared_outcome"])
 
     def test_deviations_and_coverage_need_an_explicit_declaration(self):
-        for key, bad in (("deviations", []), ("deviations", ""), ("coverage_gaps", []), ("coverage_gaps", "none")):
+        for key, bad in (("deviations", ""), ("deviations", "None"), ("coverage_gaps", "none"), ("coverage_gaps", {})):
             rec = base()
             rec[key] = bad
             self.assertEqual(codes(check(rec)), [(key, "value")], (key, bad))
+        for key in ("deviations", "coverage_gaps"):  # an empty list declares nothing: a gap, not a shape error
+            rec = base()
+            rec[key] = []
+            self.assertEqual(codes(check(rec)), [(key, "missing_evidence")], key)
         rec = base()
         rec["coverage_gaps"] = "none_declared"
+        self.assertEqual(check(rec)["status"], vr.COMPLETE)
+
+
+def get(rec, path):
+    obj = rec
+    for part in path:
+        obj = obj[part]
+    return obj
+
+
+# Every evidence field of one entry, as a path into the complete fixture.
+EVIDENCE_FIELDS = [
+    ("sign_offs", "approver", "reference"), ("sign_offs", "operator", "confirmed_how"), ("sign_offs", "verifier", "at"),
+    ("timeline", "preconditions_confirmed"), ("timeline", "links_severed"), ("timeline", "ended"),
+    ("timeline", "restore_started"), ("timeline", "restore_finished"),
+    ("preconditions", 0, "state"),
+    ("abort_criteria", 0, "observed_extreme"), ("abort_criteria", 1, "crossed"), ("abort_criteria", 2, "response"),
+    ("recovery_checks", 0, "checked_by_role"), ("recovery_checks", 0, "checked_by_reference"),
+    ("recovery_checks", 1, "state"), ("recovery_checks", 1, "at"), ("recovery_checks", 2, "reference"),
+    ("deviations",), ("coverage_gaps",), ("outcome", "declared"),
+]
+
+
+def dotted(path):
+    out = ""
+    for part in path:
+        out += f"[{part}]" if isinstance(part, int) else (f".{part}" if out else part)
+    return out
+
+
+class EvidenceAbsence(unittest.TestCase):
+    """Absent evidence is incomplete; malformed structure, type or discriminator is invalid."""
+
+    def test_each_absent_evidence_field_is_missing_evidence(self):
+        for path in EVIDENCE_FIELDS:
+            rec = base()
+            del get(rec, path[:-1])[path[-1]]
+            r = check(rec)
+            self.assertEqual(r["status"], vr.INCOMPLETE, path)
+            self.assertIn((dotted(path), "missing_evidence"), codes(r), path)
+            self.assertEqual(codes(r, vr.INVALID), [], path)
+
+    def test_absent_sections_report_every_plan_item(self):
+        expected = {
+            "sign_offs": [(f"sign_offs.{n}", "missing_evidence") for n in ("approver", "operator", "verifier")],
+            "timeline": [(f"timeline.{e}", "missing_evidence") for e in vr.TIMELINE_EVENTS],
+            "outcome": [("outcome.declared", "missing_evidence")],
+            "preconditions": [("preconditions", "missing_evidence")] * 3,
+            "abort_criteria": [("abort_criteria", "missing_evidence")] * 3,
+            "recovery_checks": [("recovery_checks", "missing_evidence")] * 3,
+        }
+        for key, want in expected.items():
+            rec = base()
+            del rec[key]
+            r = check(rec)
+            self.assertEqual(r["status"], vr.INCOMPLETE, key)
+            self.assertEqual(codes(r), sorted(want), key)
+
+    def test_empty_lists_and_mappings_are_gaps_not_shape_errors(self):
+        for key in ("preconditions", "abort_criteria", "recovery_checks"):
+            rec = base()
+            rec[key] = []
+            r = check(rec)
+            self.assertEqual(r["status"], vr.INCOMPLETE, key)
+            self.assertEqual(codes(r), [(key, "missing_evidence")] * 3, key)
+        rec = base()
+        rec["sign_offs"]["approver"] = {}
+        self.assertEqual(codes(check(rec)), [(f"sign_offs.approver.{k}", "missing_evidence")
+                                             for k in ("at", "confirmed_how", "reference")])
+        rec = base()
+        rec["sign_offs"] = {}
+        self.assertEqual(check(rec)["status"], vr.INCOMPLETE)
+
+    def test_structure_stays_invalid_when_absent(self):
+        for path in (("schema_version",), ("record_id",), ("plan",), ("window",), ("plan", "plan_sha256"),
+                     ("plan", "validator_source_commit"), ("window", "end"), ("abort_criteria", 0, "id"),
+                     ("recovery_checks", 2, "id"), ("preconditions", 1, "id")):
+            rec = base()
+            del get(rec, path[:-1])[path[-1]]
+            r = check(rec)
+            self.assertEqual(r["status"], vr.INVALID, path)
+            self.assertIn((dotted(path), "missing"), codes(r), path)
+
+    def test_wrong_type_or_discriminator_stays_invalid(self):
+        cases = [
+            (("abort_criteria", 0, "observed_extreme"), "high", "number"),
+            (("abort_criteria", 0, "observed_extreme"), True, "number"),
+            (("abort_criteria", 1, "crossed"), "yes", "boolean"),
+            (("abort_criteria", 2, "response"), 5, "text"),
+            (("abort_criteria", 2, "response"), "  ", "text"),
+            (("preconditions", 0, "state"), "done", "value"),
+            (("recovery_checks", 0, "state"), "passed", "value"),
+            (("recovery_checks", 0, "checked_by_role"), "auditor", "value"),
+            (("sign_offs", "approver", "confirmed_how"), ["x"], "text"),
+            (("timeline", "ended"), "yesterday", "time"),
+            (("outcome", "declared"), "passed", "value"),
+            (("abort_criteria",), {"id": "abort-error-rate"}, "list"),
+            (("recovery_checks",), "none", "list"),
+            (("sign_offs",), ["approver"], "shape"),
+            (("timeline",), "2026-12-01T09:00:00Z", "shape"),
+            (("sign_offs", "approver"), "yes", "shape"),
+        ]
+        for path, bad, code in cases:
+            rec = base()
+            get(rec, path[:-1])[path[-1]] = bad
+            r = check(rec)
+            self.assertEqual(r["status"], vr.INVALID, (path, bad))
+            self.assertIn((dotted(path), code), codes(r), (path, bad))
+
+
+class NotObservedLiteral(unittest.TestCase):
+    """The exact literal not_observed is a declared gap in every evidence field; other prose is just text."""
+
+    def test_literal_in_any_evidence_field_is_incomplete_and_never_compared(self):
+        fields = EVIDENCE_FIELDS + [("preconditions", 0, "reference")]
+        for path in fields:
+            rec = base()
+            get(rec, path[:-1])[path[-1]] = "not_observed"
+            r = check(rec)
+            self.assertEqual(r["status"], vr.INCOMPLETE, path)
+            self.assertEqual(codes(r, vr.INCOMPLETE), [(dotted(path), "not_observed")], path)
+            self.assertEqual(codes(r, vr.MISMATCH), [], path)
+            self.assertEqual(codes(r, vr.INVALID), [], path)
+
+    def test_codex_reported_fields_are_incomplete(self):
+        for path in (("abort_criteria", 0, "response"), ("sign_offs", "approver", "confirmed_how"),
+                     ("recovery_checks", 0, "reference"), ("recovery_checks", 0, "checked_by_reference")):
+            rec = base()
+            get(rec, path[:-1])[path[-1]] = "not_observed"
+            self.assertEqual(check(rec)["status"], vr.INCOMPLETE, path)
+
+    def test_whole_section_declared_not_observed(self):
+        for key in ("sign_offs", "timeline", "preconditions", "abort_criteria", "recovery_checks",
+                    "deviations", "coverage_gaps", "outcome"):
+            rec = base()
+            rec[key] = "not_observed"
+            r = check(rec)
+            self.assertEqual(r["status"], vr.INCOMPLETE, key)
+            self.assertEqual(codes(r), [(key, "not_observed")], key)
+
+    def test_list_items_and_outcome_details(self):
+        rec = base()
+        rec["coverage_gaps"].append("not_observed")
+        self.assertEqual(codes(check(rec)), [("coverage_gaps[2]", "not_observed")])
+        rec = base()
+        rec["deviations"] = [{"description": "not_observed"}]
+        self.assertEqual(codes(check(rec)), [("deviations[0].description", "not_observed")])
+        rec = yaml.safe_load(ABORTED.read_bytes())
+        rec["outcome"]["abort_criterion_id"] = "not_observed"
+        self.assertEqual(codes(check(rec)), [("outcome.abort_criterion_id", "not_observed")])
+
+    def test_other_prose_is_not_given_a_meaning(self):
+        for text in ("Not observed", " not_observed", "not observed", "NOT_OBSERVED", "unknown", "n/a"):
+            rec = base()
+            rec["abort_criteria"][0]["response"] = text
+            rec["sign_offs"]["operator"]["confirmed_how"] = text
+            rec["recovery_checks"][0]["reference"] = text
+            self.assertEqual(check(rec)["status"], vr.COMPLETE, text)
+            rec = base()
+            rec["sign_offs"]["approver"]["reference"] = text  # compared as a reference, like any text
+            self.assertEqual(codes(check(rec)), [("sign_offs.approver.reference", "role_reference_mismatch")], text)
+
+
+class RecoveryControls(unittest.TestCase):
+    """Controls: the absence and not_observed rules must not reject complete records."""
+
+    def test_verified_and_not_verified_checks_are_both_complete(self):
+        for state in ("verified", "not_verified"):
+            rec = base()
+            for entry in rec["recovery_checks"]:
+                entry["state"] = state
+            r = check(rec)
+            self.assertEqual(r["status"], vr.COMPLETE, state)
+            self.assertEqual(r["reasons"], [], state)
+
+    def test_aborted_with_failed_check_is_complete(self):
+        rec = yaml.safe_load(ABORTED.read_bytes())
+        self.assertIn("not_verified", [e["state"] for e in rec["recovery_checks"]])
+        r = check(rec)
+        self.assertEqual((r["status"], r["declared_outcome"]), (vr.COMPLETE, "aborted"))
+
+    def test_gap_then_declared_then_filled_recovers(self):
+        rec = base()
+        del rec["recovery_checks"][1]["at"]
+        self.assertEqual(check(rec)["status"], vr.INCOMPLETE)
+        rec["recovery_checks"][1]["at"] = "not_observed"
+        self.assertEqual(codes(check(rec)), [("recovery_checks[1].at", "not_observed")])
+        rec["recovery_checks"][1]["at"] = base()["recovery_checks"][1]["at"]
+        r = check(rec)
+        self.assertEqual(r["status"], vr.COMPLETE)
+        self.assertEqual(r["record"]["record_sha256"], check(base())["record"]["record_sha256"])
+
+    def test_optional_precondition_reference_may_be_omitted(self):
+        rec = base()
+        for entry in rec["preconditions"]:
+            entry.pop("reference", None)
+        self.assertEqual(check(rec)["status"], vr.COMPLETE)
+
+
+class ValidatorSourceCommit(unittest.TestCase):
+    """A declaration of which validate_plan.py source produced the digests; echoed, never verified."""
+
+    def test_declared_commit_is_echoed(self):
+        r = check(base())
+        self.assertEqual(r["plan"]["declared_validator_source_commit"], "1b85c2e5e00a909989b7cfa81938c33e917a72c8")
+
+    def test_sha256_object_ids_are_accepted(self):
+        rec = base()
+        rec["plan"]["validator_source_commit"] = "a" * 64
+        r = check(rec)
+        self.assertEqual(r["status"], vr.COMPLETE)
+        self.assertEqual(r["plan"]["declared_validator_source_commit"], "a" * 64)
+
+    def test_malformed_commit_is_invalid_and_not_echoed(self):
+        for bad in ("1b85c2e", "1B85C2E5E00A909989B7CFA81938C33E917A72C8", "g" * 40, 123, "not_observed", "a" * 41):
+            rec = base()
+            rec["plan"]["validator_source_commit"] = bad
+            r = check(rec)
+            self.assertEqual(codes(r), [("plan.validator_source_commit", "commit")], bad)
+            self.assertIsNone(r["plan"]["declared_validator_source_commit"], bad)
+
+    def test_missing_commit_is_invalid(self):
+        rec = base()
+        del rec["plan"]["validator_source_commit"]
+        r = check(rec)
+        self.assertEqual(codes(r), [("plan.validator_source_commit", "missing")])
+        self.assertIsNone(r["plan"]["declared_validator_source_commit"])
+
+    def test_any_well_formed_commit_is_accepted_because_nothing_is_verified(self):
+        rec = base()
+        rec["plan"]["validator_source_commit"] = "0" * 40
         self.assertEqual(check(rec)["status"], vr.COMPLETE)
 
 

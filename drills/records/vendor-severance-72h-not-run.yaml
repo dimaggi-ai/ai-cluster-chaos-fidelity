@@ -8,6 +8,7 @@ plan:
   plan_sha256: c299b94ce2326a174a1ab561ec57bc4fdc8a504e5e1ce531ee897f4ef76a8914
   file_sha256: 5022bc45ba12ae1cc7e6afd5f6ca54730a383518b08feccb0412ddffbc3004cf
   validator_status: plan_valid_not_run
+  validator_source_commit: 1b85c2e5e00a909989b7cfa81938c33e917a72c8
 window:
   start: "2026-12-01T09:00:00Z"
   end: "2026-12-04T09:00:00Z"
