@@ -445,6 +445,126 @@ class NotObservedLiteral(unittest.TestCase):
             self.assertEqual(codes(check(rec)), [("sign_offs.approver.reference", "role_reference_mismatch")], text)
 
 
+class ExplicitNull(unittest.TestCase):
+    """A supplied null (a blank YAML value) has the wrong type: invalid, never complete (task123 R3).
+
+    Absent evidence stays incomplete (missing_evidence); only an omitted key is absent.
+    """
+
+    TYPE_CODE = {"reference": "text", "confirmed_how": "text", "response": "text", "checked_by_reference": "text",
+                 "at": "time", "state": "value", "checked_by_role": "value", "declared": "value",
+                 "observed_extreme": "number", "crossed": "boolean", "deviations": "value", "coverage_gaps": "value"}
+    CODEX_FIELDS = (("abort_criteria", 0, "response"), ("sign_offs", "approver", "confirmed_how"),
+                    ("recovery_checks", 2, "reference"), ("recovery_checks", 0, "checked_by_reference"),
+                    ("abort_criteria", 0, "observed_extreme"), ("timeline", "restore_finished"),
+                    ("outcome", "declared"), ("coverage_gaps",))
+
+    def code(self, path):
+        return "time" if path[0] == "timeline" else self.TYPE_CODE[path[-1]]
+
+    def test_null_in_every_evidence_field_is_invalid_with_its_type_code(self):
+        for path in EVIDENCE_FIELDS + [("abort_criteria", 0, "crossed"), ("abort_criteria", 0, "response"),
+                                       ("sign_offs", "approver", "confirmed_how")]:
+            rec = base()
+            get(rec, path[:-1])[path[-1]] = None
+            r = check(rec)
+            self.assertEqual(r["status"], vr.INVALID, path)
+            self.assertEqual(codes(r), [(dotted(path), self.code(path))], path)
+
+    def test_codex_reported_fields_null_absent_and_corrected(self):
+        for path in self.CODEX_FIELDS:
+            null, absent = base(), base()
+            want = get(null, path[:-1])[path[-1]]
+            get(null, path[:-1])[path[-1]] = None
+            del get(absent, path[:-1])[path[-1]]
+            r = check(null)
+            self.assertEqual(r["status"], vr.INVALID, path)
+            self.assertNotEqual(r["reasons"], [], path)
+            self.assertEqual(check(absent)["status"], vr.INCOMPLETE, path)
+            get(null, path[:-1])[path[-1]] = want
+            self.assertEqual(check(null)["status"], vr.COMPLETE, path)
+
+    def test_cli_blank_value_exits_one_absent_exits_one_corrected_exits_zero(self):
+        def run(data):
+            with tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "record.yaml"
+                path.write_bytes(data)
+                out = subprocess.run([sys.executable, str(HERE / "validate_record.py"), str(PLAN), str(path)],
+                                     capture_output=True, text=True, timeout=60)
+                self.assertEqual(path.read_bytes(), data)
+            return out.returncode, json.loads(out.stdout)
+        rec = base()
+        rec["abort_criteria"][0]["response"] = None
+        blank = dump(rec).replace(b"response: null", b"response:")
+        self.assertIn(b"response:\n", blank)
+        code, report = run(blank)
+        self.assertEqual((code, report["status"]), (1, vr.INVALID))
+        self.assertEqual(codes(report), [("abort_criteria[0].response", "text")])
+        del rec["abort_criteria"][0]["response"]
+        code, report = run(dump(rec))
+        self.assertEqual((code, report["status"]), (1, vr.INCOMPLETE))
+        self.assertEqual(codes(report), [("abort_criteria[0].response", "missing_evidence")])
+        code, report = run(COMPLETE.read_bytes())
+        self.assertEqual((code, report["status"], report["reasons"]), (0, vr.COMPLETE, []))
+
+    def test_null_sections_and_lists_are_invalid_shape(self):
+        for key, code in (("sign_offs", "shape"), ("timeline", "shape"), ("outcome", "shape"),
+                          ("preconditions", "list"), ("abort_criteria", "list"), ("recovery_checks", "list")):
+            rec = base()
+            rec[key] = None
+            r = check(rec)
+            self.assertEqual(r["status"], vr.INVALID, key)
+            self.assertIn((key, code), codes(r), key)
+        rec = base()
+        rec["sign_offs"]["approver"] = None
+        self.assertEqual(codes(check(rec)), [("sign_offs.approver", "shape")])
+
+    def test_null_structure_stays_invalid(self):
+        for path in (("schema_version",), ("record_id",), ("plan",), ("window",), ("plan", "plan_id"),
+                     ("plan", "plan_sha256"), ("plan", "validator_source_commit"), ("window", "end"),
+                     ("abort_criteria", 0, "id"), ("recovery_checks", 2, "id")):
+            rec = base()
+            get(rec, path[:-1])[path[-1]] = None
+            self.assertEqual(check(rec)["status"], vr.INVALID, path)
+
+    def test_null_optional_fields_when_supplied_are_invalid(self):
+        rec = base()
+        rec["preconditions"][0]["reference"] = None
+        self.assertEqual(codes(check(rec)), [("preconditions[0].reference", "text")])
+        rec = yaml.safe_load(ABORTED.read_bytes())
+        rec["outcome"]["abort_criterion_id"] = None
+        self.assertEqual(codes(check(rec)), [("outcome.abort_criterion_id", "text")])
+        rec = base()
+        rec["deviations"] = [{"description": None}]
+        self.assertEqual(codes(check(rec)), [("deviations[0].description", "text")])
+        rec = base()
+        rec["coverage_gaps"] = [None]
+        self.assertEqual(codes(check(rec)), [("coverage_gaps[0]", "text")])
+
+    def test_null_never_yields_complete_anywhere_in_the_fixture(self):
+        # Every scalar leaf of the complete record, set to null, must leave the record not complete.
+        def leaves(obj, path=()):
+            if isinstance(obj, dict):
+                for k, v in obj.items():
+                    yield from leaves(v, path + (k,))
+            elif isinstance(obj, list):
+                for i, v in enumerate(obj):
+                    yield from leaves(v, path + (i,))
+            else:
+                yield path
+        rec0 = base()
+        optional_free = set()  # notes and synthetic are typed too: null is invalid
+        count = 0
+        for path in leaves(rec0):
+            if path in optional_free:
+                continue
+            rec = base()
+            get(rec, path[:-1])[path[-1]] = None
+            self.assertNotEqual(check(rec)["status"], vr.COMPLETE, path)
+            count += 1
+        self.assertGreater(count, 40)
+
+
 class RecoveryControls(unittest.TestCase):
     """Controls: the absence and not_observed rules must not reject complete records."""
 

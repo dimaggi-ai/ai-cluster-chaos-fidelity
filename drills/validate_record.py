@@ -42,6 +42,7 @@ COMPLETE = "evidence_complete_not_judged"
 PRECEDENCE = (INVALID, MISMATCH, INCOMPLETE)
 
 NOT_OBSERVED = "not_observed"
+GAP = object()  # internal: evidence absent and already reported; never equal to any value
 OUTCOMES = ("completed_as_planned", "aborted", "not_run")
 TIMELINE_EVENTS = ("preconditions_confirmed", "links_severed", "ended", "restore_started", "restore_finished")
 HEX64 = re.compile(r"[0-9a-f]{64}")
@@ -110,16 +111,20 @@ class _RecordChecker(vp._Checker):
         return (obj or {}).get(key)
 
     # Evidence fields. Absent evidence is a gap (incomplete), the exact literal
-    # not_observed is a declared gap (incomplete), and anything else must have the
-    # field's type (invalid otherwise). No other text is given a meaning.
-    # Each returns the usable value, NOT_OBSERVED, or None (absent or malformed).
+    # not_observed is a declared gap (incomplete), and anything else, including an
+    # explicit null (a blank YAML value), must have the field's type (invalid
+    # otherwise). No other text is given a meaning.
+    # ev returns GAP when absent (already reported), NOT_OBSERVED, or the supplied
+    # value, which may be None; the typed helpers below refuse that None as the
+    # wrong type. ev_text, ev_enum and ev_time return the usable value,
+    # NOT_OBSERVED, or None (absent or malformed; already reported).
 
     def ev(self, obj, key, path):
         if obj is None:
-            return None
+            return GAP
         if key not in obj:
             self.gap(path, "required evidence is missing")
-            return None
+            return GAP
         value = obj[key]
         if isinstance(value, str) and value == NOT_OBSERVED:
             self.fail(path, "not_observed", "declared not observed")
@@ -128,7 +133,9 @@ class _RecordChecker(vp._Checker):
 
     def ev_text(self, obj, key, path):
         value = self.ev(obj, key, path)
-        if value is None or value == NOT_OBSERVED:
+        if value is GAP:
+            return None
+        if value == NOT_OBSERVED:
             return value
         if not isinstance(value, str) or not value.strip():
             self.fail(path, "text", "must be non-empty text or not_observed")
@@ -137,7 +144,9 @@ class _RecordChecker(vp._Checker):
 
     def ev_enum(self, obj, key, path, choices):
         value = self.ev(obj, key, path)
-        if value is None or value == NOT_OBSERVED:
+        if value is GAP:
+            return None
+        if value == NOT_OBSERVED:
             return value
         if value not in choices:
             self.fail(path, "value", f"must be one of {list(choices) + [NOT_OBSERVED]}")
@@ -146,7 +155,9 @@ class _RecordChecker(vp._Checker):
 
     def ev_time(self, obj, key, path):
         value = self.ev(obj, key, path)
-        if value is None or value == NOT_OBSERVED:
+        if value is GAP:
+            return None
+        if value == NOT_OBSERVED:
             return value
         parsed = vp._utc(value)
         if isinstance(parsed, tuple):
@@ -336,10 +347,10 @@ def _check(plan: dict, plan_report: dict, record) -> tuple[list[dict], dict]:
         c.text(entry, "id", f"{p}.id")
         c.ev_text(entry, "response", f"{p}.response")
         value = c.ev(entry, "observed_extreme", f"{p}.observed_extreme")
-        if value not in (None, NOT_OBSERVED) and (isinstance(value, bool) or not isinstance(value, (int, float))):
+        if value is not GAP and value != NOT_OBSERVED and (isinstance(value, bool) or not isinstance(value, (int, float))):
             c.fail(f"{p}.observed_extreme", "number", "must be a number or not_observed")
         crossed = c.ev(entry, "crossed", f"{p}.crossed")
-        if crossed not in (None, NOT_OBSERVED) and not isinstance(crossed, bool):
+        if crossed is not GAP and crossed != NOT_OBSERVED and not isinstance(crossed, bool):
             c.fail(f"{p}.crossed", "boolean", "must be true, false or not_observed")
     seen_abort = _index(c, aborts, "abort_criteria")
     for ident in sorted(set(seen_abort) - plan_abort):
@@ -392,7 +403,7 @@ def _check(plan: dict, plan_report: dict, record) -> tuple[list[dict], dict]:
         for i, item in enumerate(dev):
             entry = c.fields(item, f"deviations[{i}]", (), ("description",))
             c.ev_text(entry, "description", f"deviations[{i}].description")
-    elif dev not in (None, NOT_OBSERVED):
+    elif dev is not GAP and dev != NOT_OBSERVED:
         c.fail("deviations", "value", "must be the word none, not_observed or a list of {description}")
     gaps = c.ev(top, "coverage_gaps", "coverage_gaps")
     if isinstance(gaps, list) and not gaps:
@@ -403,7 +414,7 @@ def _check(plan: dict, plan_report: dict, record) -> tuple[list[dict], dict]:
                 c.fail(f"coverage_gaps[{i}]", "not_observed", "declared not observed")
             elif not isinstance(item, str) or not item.strip():
                 c.fail(f"coverage_gaps[{i}]", "text", "must be non-empty text")
-    elif gaps not in (None, NOT_OBSERVED, "none_declared"):
+    elif gaps is not GAP and gaps not in (NOT_OBSERVED, "none_declared"):
         c.fail("coverage_gaps", "value", "must be none_declared, not_observed or a list of text")
 
     # ---- outcome: declared, never inferred, never upgraded

@@ -30,6 +30,8 @@ Fields are of two kinds:
 
 A value of the wrong type, or outside a closed set of choices, is `invalid` whether or not it is evidence.
 
+An explicit null, which is what a blank YAML value such as `response:` becomes, is a supplied value of the wrong type: it is `invalid` in every typed field, evidence or structure, required or optional. Only an omitted key is absent evidence (`incomplete`). An empty list or mapping is a gap as above; a null section or entry is `invalid` (`shape` or `list`).
+
 | Field | Required | Rule |
 |---|---|---|
 | `schema_version` | yes | Exactly `drill-record/v1`. |
