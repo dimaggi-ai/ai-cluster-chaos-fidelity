@@ -24,3 +24,5 @@ jobs:
         run: |
           python3 drills/validate_plan.py drills/plans/vendor-severance-72h.yaml
           python3 -m unittest discover -s drills -p test_validate_plan.py
+      - name: Drill evidence records (completeness, not judged)
+        run: python3 -m unittest discover -s drills -p test_validate_record.py
