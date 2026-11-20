@@ -1,0 +1,94 @@
+# Invalid on purpose: operator declared as an agent
+# Synthetic example. Plan only: nothing here runs, and a valid result is not a drill result.
+schema_version: drill-plan/v1
+mode: plan-only
+synthetic: true
+plan_id: vendor-severance-72h-example
+title: Vendor control-plane connection severed for 72 hours (staging, synthetic)
+environment:
+  class: staging
+  description: A staging cluster with no customer workloads. Synthetic example; names are placeholders.
+scenario:
+  kind: vendor-control-plane-disconnection
+  description: >
+    The links from the cluster to the vendor's control plane (management API,
+    update channel and licence check) are unavailable for the window. Workloads
+    keep their data-plane links.
+  severed_links:
+    - name: vendor-management-api
+      plane: control
+      description: Management and configuration API reached from the cluster.
+    - name: vendor-update-channel
+      plane: control
+      description: Channel that delivers updates and signed bundles.
+    - name: vendor-licence-check
+      plane: control
+      description: Periodic licence or entitlement check.
+  excluded_links:
+    - name: tenant-ingress
+      plane: data
+      description: Traffic from users to workloads stays up.
+    - name: in-cluster-storage
+      plane: data
+      description: Storage traffic inside the boundary stays up.
+window:
+  start: "2026-12-01T09:00:00Z"
+  end: "2026-12-04T09:00:00Z"
+  duration_hours: 72
+preconditions:
+  - id: pre-backup
+    description: A tested restore point for cluster configuration exists and is dated within 24 hours of the start.
+  - id: pre-staging-only
+    description: The approver confirms in writing that the target is the staging cluster and holds no customer data.
+  - id: pre-rollback-rehearsed
+    description: The restore procedure below was rehearsed once on the same staging cluster.
+abort_criteria:
+  - id: abort-error-rate
+    signal: staging request error rate
+    comparator: ">"
+    threshold: 5
+    unit: percent
+    sustained_minutes: 10
+  - id: abort-node-unready
+    signal: nodes not ready
+    comparator: ">="
+    threshold: 2
+    unit: nodes
+    sustained_minutes: 15
+  - id: abort-cert-expiry
+    signal: hours until earliest in-cluster certificate expiry
+    comparator: "<"
+    threshold: 24
+    unit: hours
+    sustained_minutes: 1
+    description: Stop before a certificate that needs the vendor to renew it expires.
+restore:
+  procedure: >
+    Re-enable the severed control-plane links in the order listed above, then
+    confirm each link responds before moving to the next.
+  max_restore_minutes: 60
+recovery_checks:
+  - id: check-links-back
+    check: Each severed link responds to the vendor's documented health check.
+    checked_by_role: verifier
+  - id: check-workloads
+    check: Staging error rate is back under its pre-drill baseline for 30 minutes.
+    checked_by_role: verifier
+  - id: check-signoff
+    check: The approver reviews the evidence record and marks restoration verified or not verified.
+    checked_by_role: approver
+roles:
+  approver:
+    kind: human
+    name: Example Approver
+    reference: approver@example.invalid
+  operator:
+    kind: agent
+    name: Example Operator
+    reference: operator@example.invalid
+  verifier:
+    kind: human
+    name: Example Verifier
+    reference: verifier@example.invalid
+evidence:
+  template: drill-evidence/v1
