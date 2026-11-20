@@ -89,6 +89,15 @@ across halls and the identical category error reappears wearing new words —
   ceiling). The experiment is whether load sheds *inside* that window. A
   `gpu-burn` changes the heat, not the cooling, and hands you no window to
   miss.
+- **A load surge is not a slow request.** A surge is a *demand* fault: every
+  component is healthy and more requests arrive than the system was sized
+  for, so the experiment is whether admission queues and sheds instead of
+  timing out everywhere at once. `HTTPChaos` delays or aborts the requests
+  already in flight and a pod kill removes a replica; both rehearse degraded
+  supply. Only generated demand (`load-replay`: a synthetic or recorded trace
+  replayed at a multiple of baseline) exercises the shed path. The rule needs a
+  surge word next to a demand word, because "load" alone appears in device
+  load, checkpoint load and load balancers.
 
 ## The two clocks (why the fabric experiment matters)
 
@@ -121,6 +130,8 @@ coolant loop loss       cdu-stop (vs the ride-through   gpu-burn (heat is not co
                         clock)
 PFS stall               pfs-degrade (server-side)       iochaos (one pod), ib-link-down
                                                         (a PFS stall is not an ICI break)
+load / traffic surge    load-replay (generated demand)  httpchaos (delays, not demand),
+                                                        pod-kill (removes capacity)
 ```
 
 A fourth rule arrived with v1.1: **the technique must live on the layer the

@@ -77,6 +77,9 @@ TECHNIQUES = (
     "cdu-stop",             # stop the coolant distribution unit or close the loop
     "pfs-degrade",          # degrade the SHARED parallel filesystem server-side
                             # (stop an OST/MDS, throttle metadata) — every rank at once
+    "load-replay",          # GENERATE load: replay a synthetic or recorded request
+                            # trace at a multiple of the baseline rate. It adds
+                            # requests; it does not fault the ones in flight
 )
 
 # techniques that physically stress hardware or the fabric: an autonomous
@@ -187,6 +190,18 @@ FIDELITY_RULES = [
         "fabric — a PFS stall is not an ICI break, and certifying it as one "
         "retires the wrong risk in the wrong quarter",
     ),
+    (
+        r"(\b(load|traffic|requests?|qps|rps|demand)[\s_-]*(surge|spike|burst|flood)"
+        r"|\b(surge|spike|burst|flood)s?\s+(of|in)\s+(load|traffic|requests|demand)\b"
+        r"|flash.?crowd|thundering.?herd)",
+        {"load-replay"},
+        "a load surge is a DEMAND fault: every component stays healthy and "
+        "more requests arrive than the system was sized for. What it certifies "
+        "is admission, queueing and shedding under that demand. HTTPChaos "
+        "delays or aborts the requests already there, and a pod kill removes "
+        "capacity; both test degraded supply, not excess demand, so neither "
+        "proves the shed path fires",
+    ),
 ]
 
 # --------------------------------------------------- technique -> layer map
@@ -225,6 +240,7 @@ TECHNIQUE_LAYERS = {
     "stresschaos": {"orchestration", "training-graph", "inference-graph"},
     "timechaos": {"orchestration", "training-graph", "control-plane"},
     "agent-proposal": {"control-plane"},
+    "load-replay": {"inference-graph", "control-plane"},
 }
 
 VALID_AUTONOMY = ("L0", "L1", "L2", "L3")
