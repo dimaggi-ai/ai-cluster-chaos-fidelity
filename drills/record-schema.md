@@ -18,6 +18,7 @@ Exit codes: 0 = `evidence_complete_not_judged`; 1 = `invalid`, `mismatch` or `in
 - The record is checked only against a `drill-plan/v1` plan that is `plan_valid_not_run`.
 - Loading, size limits, file reading and time parsing are those of `validate_plan.py`, imported rather than copied. The limits are the same: 64 KiB, 32 items, depth 8, 2000-character strings, 64-character keys, integers up to 10^15, UTC years 2000 to 2100. So are the loader rules: no duplicate keys, anchors, aliases, `.inf` or `.nan`; one UTF-8 document; regular files only. The refusal codes are shared too, and are listed in [schema.md](schema.md).
 - A field whose name would make the record executable (`command`, `script`, `url`, `host`, `action`, and so on) is refused as `executable_field`. Field names that look like results (`outcome`) are allowed here, unlike in a plan.
+- The shared loader reads unquoted scalars as YAML 1.1, and the checker sees only the parsed value. So `1:30` becomes 90 (base 60), `010` becomes 8 (octal), `0x10` becomes 16 and `1_000` becomes 1000, and `yes`, `no`, `on` and `off` become booleans. Write numbers as plain decimals (`1.5`, `10`), write booleans as `true` or `false`, and quote text that could be read as either.
 
 ## Fields
 
@@ -42,7 +43,7 @@ An explicit null, which is what a blank YAML value such as `response:` becomes, 
 | `plan.validator_status` | yes | Exactly `plan_valid_not_run`. |
 | `plan.validator_source_commit` | yes | The full git commit (40 or 64 lowercase hex characters) of the `validate_plan.py` source that produced the two digests. It is a declaration, echoed in the report as `plan.declared_validator_source_commit`. It is never checked against any repository, and it is not an attestation. Malformed is `invalid` (`commit`). |
 | `window.start`, `window.end` | yes | Aware ISO 8601 times naming the same instants as the plan's window. Any UTC offset is accepted. |
-| `sign_offs.<role>` | one per role the plan declares | `reference` (must equal the plan's reference for that role, ignoring case and surrounding spaces), `confirmed_how` (text), `at` (time). Each may be `not_observed`. |
+| `sign_offs.<role>` | one per role the plan declares | `reference` (must equal the plan's reference for that role, ignoring case and surrounding spaces), `confirmed_how` (text), `at` (time). Each may be `not_observed`. An entry for a recognised role (`approver`, `operator`, `verifier`) that the plan does not declare is `role_undeclared`. Its entry is still checked by every rule here, so a null, unknown or executable field is `invalid` and a missing or `not_observed` field is reported as a gap. Only the reference comparison is skipped, because the plan has no reference for that role. |
 | `timeline.<event>` | yes, all five | `preconditions_confirmed`, `links_severed`, `ended`, `restore_started`, `restore_finished`. Each is a time or `not_observed`. |
 | `preconditions[]` | one per plan precondition | `id`, `state` (`confirmed`, `not_confirmed` or `not_observed`), optional `reference` (text or `not_observed`). |
 | `abort_criteria[]` | one per plan criterion | `id`, `observed_extreme` (number or `not_observed`), `crossed` (`true`, `false` or `not_observed`), `response` (text or `not_observed`; `none` is allowed text). |
@@ -60,10 +61,10 @@ All comparisons are made in UTC.
 
 - **Inside the plan's window, inclusive:** `links_severed` and `ended`. These are observations of the drill itself.
 - **May come before the window:** `preconditions_confirmed`. It must not come after `links_severed`, or after the window's end.
-- **Order:** `preconditions_confirmed` ≤ `links_severed` ≤ `ended` ≤ `restore_started` ≤ `restore_finished`. Pairs where either side is `not_observed` are not compared.
-- **May run past the window's end:**
-  - Restoration. This is ordinary and is not a mismatch.
-  - Recovery checks. Each `at` must not precede `restore_started`, or `ended` if no restore start was observed.
+- **Order:** `preconditions_confirmed` ≤ `links_severed` ≤ `ended` ≤ `restore_started` ≤ `restore_finished`. Each observed event is compared with the nearest earlier event that was observed. An event that is `not_observed`, absent or malformed is skipped, so it neither hides an out-of-order pair around it nor is given a time.
+- **May run past the window's end, but not start before it:**
+  - Restoration. Running past the end is ordinary and is not a mismatch. A `restore_started` or `restore_finished` before the window's start is `outside_window`, even when the events between are not observed.
+  - Recovery checks. Each `at` must not precede `restore_started` (`check_before_restore`). If no restore start was observed, the bound is `ended`, then `links_severed`, then the window's start. These are weaker bounds, not inferred times.
 - **Sign-off times:** must be valid times. They are not ordered against the drill.
 
 `max_restore_minutes` is compared, never judged. When both restore times are observed, the report's `derived` block gives `restore_minutes`, `plan_max_restore_minutes` and `restore_exceeds_plan_max`. Exceeding the plan's limit does not change the status. It is a fact for reviewers.
@@ -88,7 +89,7 @@ Every reason found is kept. Each reason has a class. The status is the most seve
    - loader and limit refusals;
    - `unknown_field`, `missing` (structure only), `shape`, `list`, `value`, `text`, `number`, `boolean`, `digest`, `commit`, `time`, `time_out_of_range`, `schema_version` and `executable_field`;
    - an invalid plan (`plan_not_valid`, with the plan's own reasons);
-   - unreadable or non-regular files;
+   - unreadable or non-regular files (`unreadable`, `not_regular_file` and the shared reader's other codes). An input that cannot be read is reported only by its read error. The other input's own reasons are kept, but a record is checked against a plan only when the plan is readable and valid;
    - `internal_error`.
 2. **`mismatch`:** the record conflicts with the plan or with itself:
    - identity: `plan_id_mismatch`, `plan_sha256_mismatch`, `file_sha256_mismatch`, `window_mismatch`;

@@ -46,6 +46,25 @@ def codes(report, cls=None):
     return sorted((r["path"], r["code"]) for r in report["reasons"] if cls is None or r["class"] == cls)
 
 
+def undeclared_verifier():
+    """A valid plan that declares no verifier (its checks go to the approver), and a
+    complete record bound to it that still carries the fixture's verifier sign-off."""
+    plan = yaml.safe_load(PLAN_BYTES)
+    del plan["roles"]["verifier"]
+    for chk in plan["recovery_checks"]:
+        if chk["checked_by_role"] == "verifier":
+            chk["checked_by_role"] = "approver"
+    plan_bytes = dump(plan)
+    report = vp.validate_bytes(plan_bytes)
+    assert report["status"] == vp.VALID, report["reasons"]
+    rec = base()
+    rec["plan"].update(plan_sha256=report["plan_sha256"], file_sha256=report["file_sha256"])
+    for chk in rec["recovery_checks"]:
+        if chk["checked_by_role"] == "verifier":
+            chk.update(checked_by_role="approver", checked_by_reference=plan["roles"]["approver"]["reference"])
+    return plan_bytes, rec
+
+
 class Fixtures(unittest.TestCase):
     def test_complete_record_is_complete_not_judged(self):
         r = vr.validate_paths(PLAN, COMPLETE)
@@ -863,6 +882,288 @@ class Cli(unittest.TestCase):
     def test_usage_error_exits_two(self):
         self.assertEqual(self.run_cli(PLAN).returncode, 2)
         self.assertEqual(self.run_cli().returncode, 2)
+
+    def run_files(self, plan_bytes, record):
+        """The CLI on real files; its JSON must equal the library's report for the same paths."""
+        with tempfile.TemporaryDirectory() as tmp:
+            plan, rec = Path(tmp) / "plan.yaml", Path(tmp) / "record.yaml"
+            plan.write_bytes(plan_bytes)
+            rec.write_bytes(dump(record))
+            out = self.run_cli(plan, rec)
+            self.assertEqual(json.loads(out.stdout), vr.validate_paths(plan, rec))
+        return out.returncode, json.loads(out.stdout)
+
+    def test_undeclared_role_entries_are_checked_from_files(self):
+        plan_bytes, rec = undeclared_verifier()
+        rec["sign_offs"]["verifier"] = None
+        code, report = self.run_files(plan_bytes, rec)
+        self.assertEqual((code, report["status"]), (1, vr.INVALID))
+        self.assertEqual(codes(report), [("sign_offs.verifier", "role_undeclared"), ("sign_offs.verifier", "shape")])
+        _, rec = undeclared_verifier()
+        rec["sign_offs"]["verifier"].update(extra=True, command="INERT_SYNTHETIC_LABEL")
+        code, report = self.run_files(plan_bytes, rec)
+        self.assertEqual((code, report["status"]), (1, vr.INVALID))
+        self.assertEqual(codes(report), [("sign_offs.verifier", "role_undeclared"),
+                                         ("sign_offs.verifier.command", "executable_field"),
+                                         ("sign_offs.verifier.extra", "unknown_field")])
+        _, rec = undeclared_verifier()
+        rec["sign_offs"]["verifier"] = {}
+        code, report = self.run_files(plan_bytes, rec)
+        self.assertEqual((code, report["status"]), (1, vr.MISMATCH))
+        self.assertEqual(codes(report, vr.INCOMPLETE), [("sign_offs.verifier.at", "missing_evidence"),
+                                                        ("sign_offs.verifier.confirmed_how", "missing_evidence"),
+                                                        ("sign_offs.verifier.reference", "missing_evidence")])
+        del rec["sign_offs"]["verifier"]                   # corrected: no sign-off for an undeclared role
+        code, report = self.run_files(plan_bytes, rec)
+        self.assertEqual((code, report["status"], report["reasons"]), (0, vr.COMPLETE, []))
+
+    def test_unreadable_record_keeps_the_readable_plans_reasons(self):
+        plan = yaml.safe_load(PLAN_BYTES)
+        plan["mode"] = "run"
+        with tempfile.TemporaryDirectory() as tmp:
+            plan_path = Path(tmp) / "plan.yaml"
+            plan_path.write_bytes(dump(plan))
+            out = self.run_cli(plan_path, Path(tmp) / "absent.yaml")
+            self.assertEqual(json.loads(out.stdout), vr.validate_paths(plan_path, Path(tmp) / "absent.yaml"))
+        self.assertEqual(out.returncode, 1)
+        report = json.loads(out.stdout)
+        self.assertEqual([(x["input"], x["path"], x["code"]) for x in report["reasons"]],
+                         [("plan", "mode", "mode"), ("record", "(file)", "unreadable")])
+
+
+class UndeclaredRole(unittest.TestCase):
+    """A sign-off for a role the plan does not declare: role_undeclared, and the entry is still checked."""
+
+    def check(self, value):
+        plan_bytes, rec = undeclared_verifier()
+        if value is not ...:
+            rec["sign_offs"]["verifier"] = value
+        return check(rec, plan_bytes)
+
+    def test_the_bound_record_without_the_sign_off_is_complete(self):
+        plan_bytes, rec = undeclared_verifier()
+        del rec["sign_offs"]["verifier"]
+        self.assertEqual(check(rec, plan_bytes)["status"], vr.COMPLETE)
+
+    def test_null_entry_is_invalid(self):
+        r = self.check(None)
+        self.assertEqual(r["status"], vr.INVALID)
+        self.assertEqual(codes(r), [("sign_offs.verifier", "role_undeclared"), ("sign_offs.verifier", "shape")])
+
+    def test_list_entry_is_invalid(self):
+        r = self.check([])
+        self.assertEqual(codes(r), [("sign_offs.verifier", "role_undeclared"), ("sign_offs.verifier", "shape")])
+
+    def test_unknown_field_is_invalid(self):
+        r = self.check(dict(base()["sign_offs"]["verifier"], extra=True))
+        self.assertEqual(r["status"], vr.INVALID)
+        self.assertEqual(codes(r), [("sign_offs.verifier", "role_undeclared"), ("sign_offs.verifier.extra", "unknown_field")])
+
+    def test_executable_field_is_invalid(self):
+        r = self.check(dict(base()["sign_offs"]["verifier"], command="INERT_SYNTHETIC_LABEL"))
+        self.assertEqual(r["status"], vr.INVALID)
+        self.assertEqual(codes(r), [("sign_offs.verifier", "role_undeclared"),
+                                    ("sign_offs.verifier.command", "executable_field")])
+
+    def test_unknown_and_executable_fields_are_both_reported(self):
+        r = self.check(dict(base()["sign_offs"]["verifier"], extra=True, command="INERT_SYNTHETIC_LABEL"))
+        self.assertEqual(r["status"], vr.INVALID)
+        self.assertEqual(codes(r), [("sign_offs.verifier", "role_undeclared"),
+                                    ("sign_offs.verifier.command", "executable_field"),
+                                    ("sign_offs.verifier.extra", "unknown_field")])
+
+    def test_wrong_types_and_nulls_inside_the_entry_are_invalid(self):
+        r = self.check({"reference": None, "confirmed_how": 5, "at": "yesterday"})
+        self.assertEqual(r["status"], vr.INVALID)
+        self.assertEqual(codes(r), [("sign_offs.verifier", "role_undeclared"), ("sign_offs.verifier.at", "time"),
+                                    ("sign_offs.verifier.confirmed_how", "text"), ("sign_offs.verifier.reference", "text")])
+
+    def test_evidence_gaps_are_reported_beside_the_mismatch(self):
+        r = self.check({})
+        self.assertEqual(r["status"], vr.MISMATCH)
+        self.assertEqual(codes(r), [("sign_offs.verifier", "role_undeclared"),
+                                    ("sign_offs.verifier.at", "missing_evidence"),
+                                    ("sign_offs.verifier.confirmed_how", "missing_evidence"),
+                                    ("sign_offs.verifier.reference", "missing_evidence")])
+
+    def test_not_observed_fields_and_entry_are_reported_beside_the_mismatch(self):
+        r = self.check({"reference": "not_observed", "confirmed_how": "not_observed", "at": "not_observed"})
+        self.assertEqual(r["status"], vr.MISMATCH)
+        self.assertEqual(codes(r), [("sign_offs.verifier", "role_undeclared"), ("sign_offs.verifier.at", "not_observed"),
+                                    ("sign_offs.verifier.confirmed_how", "not_observed"),
+                                    ("sign_offs.verifier.reference", "not_observed")])
+        r = self.check("not_observed")
+        self.assertEqual(codes(r), [("sign_offs.verifier", "not_observed"), ("sign_offs.verifier", "role_undeclared")])
+
+    def test_valid_entry_is_only_undeclared_never_compared(self):
+        r = self.check(dict(base()["sign_offs"]["verifier"], reference="different@example.invalid"))
+        self.assertEqual(r["status"], vr.MISMATCH)
+        self.assertEqual(codes(r), [("sign_offs.verifier", "role_undeclared")])
+
+    def test_refusal_then_corrected_recovery(self):
+        plan_bytes, rec = undeclared_verifier()
+        rec["sign_offs"]["verifier"].update(extra=True, command="INERT_SYNTHETIC_LABEL", at=None)
+        self.assertEqual(check(rec, plan_bytes)["status"], vr.INVALID)
+        for key in ("extra", "command"):
+            del rec["sign_offs"]["verifier"][key]
+        rec["sign_offs"]["verifier"]["at"] = "2026-11-30T17:00:00Z"
+        second = check(rec, plan_bytes)
+        self.assertEqual((second["status"], codes(second)), (vr.MISMATCH, [("sign_offs.verifier", "role_undeclared")]))
+        del rec["sign_offs"]["verifier"]
+        self.assertEqual(check(rec, plan_bytes)["status"], vr.COMPLETE)
+
+    def test_declared_roles_are_unchanged(self):
+        rec = base()
+        rec["sign_offs"]["verifier"]["reference"] = "different@example.invalid"
+        self.assertEqual(codes(check(rec)), [("sign_offs.verifier.reference", "role_reference_mismatch")])
+        rec = base()
+        rec["sign_offs"]["operator"] = None
+        self.assertEqual(codes(check(rec)), [("sign_offs.operator", "shape")])
+
+
+class UnreadableInputs(unittest.TestCase):
+    """One input cannot be read: it is reported by its read error alone; the other input's reasons stay."""
+
+    def paths(self, tmp, plan=None, record=None):
+        plan_path, rec_path = Path(tmp) / "plan.yaml", Path(tmp) / "record.yaml"
+        if plan is not None:
+            plan_path.write_bytes(plan)
+        if record is not None:
+            rec_path.write_bytes(record)
+        return vr.validate_paths(plan_path, rec_path)
+
+    def test_invalid_readable_plan_keeps_its_reasons(self):
+        plan = yaml.safe_load(PLAN_BYTES)
+        plan["mode"] = "run"
+        with tempfile.TemporaryDirectory() as tmp:
+            r = self.paths(tmp, plan=dump(plan))
+        self.assertEqual(r["status"], vr.INVALID)
+        self.assertEqual([(x["input"], x["path"], x["code"]) for x in r["reasons"]],
+                         [("plan", "mode", "mode"), ("record", "(file)", "unreadable")])
+        self.assertEqual(r["plan"]["status"], vp.INVALID)
+        self.assertIsNotNone(r["plan"]["file_sha256"])
+        self.assertIsNone(r["record"]["file_sha256"])
+
+    def test_valid_plan_and_unreadable_record_gives_only_the_read_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            r = self.paths(tmp, plan=PLAN_BYTES)
+        self.assertEqual([(x["input"], x["code"]) for x in r["reasons"]], [("record", "unreadable")])
+        self.assertEqual(r["plan"]["status"], vp.VALID)
+
+    def test_refused_readable_record_keeps_its_reasons_without_plan_placeholders(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            r = self.paths(tmp, record=b"record_id: a\nrecord_id: b\n")
+        self.assertEqual([(x["input"], x["code"]) for x in r["reasons"]],
+                         [("plan", "unreadable"), ("record", "duplicate_key")])
+        self.assertEqual(r["plan"]["status"], vp.INVALID)
+
+    def test_valid_readable_record_and_unreadable_plan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            r = self.paths(tmp, record=COMPLETE.read_bytes())
+        self.assertEqual([(x["input"], x["code"]) for x in r["reasons"]], [("plan", "unreadable")])
+        self.assertEqual(r["record"]["file_sha256"], hashlib.sha256(COMPLETE.read_bytes()).hexdigest())
+        self.assertIsNone(r["derived"]["restore_minutes"])
+
+    def test_record_file_kind_message_names_records(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            r = vr.validate_paths(PLAN, tmp)
+            self.assertEqual([(x["input"], x["code"]) for x in r["reasons"]], [("record", "not_regular_file")])
+            self.assertTrue(r["reasons"][0]["message"].startswith("records must be regular files"), r["reasons"][0])
+            r = vr.validate_paths(tmp, COMPLETE)
+            self.assertTrue(r["reasons"][0]["message"].startswith("plans must be regular files"), r["reasons"][0])
+        if hasattr(os, "mkfifo"):
+            with tempfile.TemporaryDirectory() as tmp:
+                fifo = Path(tmp) / "record.yaml"
+                os.mkfifo(fifo)
+                r = vr.validate_paths(PLAN, fifo)
+            self.assertNotIn("plan", r["reasons"][0]["message"])
+
+    def test_record_loader_messages_name_records(self):
+        r = check(b"\xff\xfe")
+        self.assertEqual([(x["input"], x["code"], x["message"]) for x in r["reasons"]],
+                         [("record", "encoding", "record is not UTF-8")])
+
+
+class TimelineBounds(unittest.TestCase):
+    """Unobserved events neither hide an ordering conflict nor are given a time."""
+
+    def test_restore_before_the_window_is_reported_when_ended_is_not_observed(self):
+        rec = base()
+        rec["timeline"].update(ended="not_observed", restore_started="2026-11-30T07:00:00Z",
+                               restore_finished="2026-11-30T07:10:00Z")
+        r = check(rec)
+        self.assertEqual(r["status"], vr.MISMATCH)
+        self.assertEqual(codes(r), [("timeline.ended", "not_observed"),
+                                    ("timeline.restore_finished", "outside_window"),
+                                    ("timeline.restore_started", "outside_window"),
+                                    ("timeline.restore_started", "timeline_order")])
+
+    def test_order_is_checked_across_an_unobserved_event(self):
+        rec = base()
+        rec["timeline"].update(links_severed="2026-12-02T09:00:00Z", ended="not_observed",
+                               restore_started="2026-12-01T10:00:00Z")
+        r = check(rec)
+        self.assertEqual(codes(r), [("timeline.ended", "not_observed"), ("timeline.restore_started", "timeline_order")])
+        self.assertIn("earlier than links_severed", [x for x in r["reasons"] if x["code"] == "timeline_order"][0]["message"])
+
+    def test_order_skips_absent_and_malformed_events_without_filling_them(self):
+        rec = base()
+        del rec["timeline"]["ended"]
+        rec["timeline"]["restore_started"] = "2026-12-01T08:00:00Z"
+        self.assertEqual(codes(check(rec)), [("timeline.ended", "missing_evidence"),
+                                             ("timeline.restore_started", "outside_window"),
+                                             ("timeline.restore_started", "timeline_order")])
+        rec["timeline"]["ended"] = "later"
+        self.assertEqual(codes(check(rec)), [("timeline.ended", "time"), ("timeline.restore_started", "outside_window"),
+                                             ("timeline.restore_started", "timeline_order")])
+
+    def test_restore_at_the_window_start_is_inside(self):
+        rec = base()
+        start = "2026-12-01T09:00:00Z"
+        rec["timeline"].update(links_severed=start, ended=start, restore_started=start)
+        self.assertEqual(check(rec)["status"], vr.COMPLETE)
+
+    def test_recovery_check_falls_back_to_links_severed(self):
+        rec = base()
+        rec["timeline"].update(ended="not_observed", restore_started="not_observed")
+        rec["recovery_checks"][0]["at"] = "2026-12-01T08:59:00Z"
+        r = check(rec)
+        self.assertIn(("recovery_checks[0].at", "check_before_restore"), codes(r))
+        self.assertIn("links_severed", [x for x in r["reasons"] if x["code"] == "check_before_restore"][0]["message"])
+
+    def test_recovery_check_falls_back_to_the_window_start(self):
+        rec = base()
+        rec["timeline"].update(links_severed="not_observed", ended="not_observed", restore_started="not_observed")
+        rec["recovery_checks"][0]["at"] = "2026-12-01T08:59:00Z"
+        r = check(rec)
+        self.assertEqual(codes(r, vr.MISMATCH), [("recovery_checks[0].at", "check_before_restore")])
+        self.assertIn("window", [x for x in r["reasons"] if x["code"] == "check_before_restore"][0]["message"])
+        rec["recovery_checks"][0]["at"] = "2026-12-01T09:00:00Z"
+        self.assertEqual(codes(check(rec), vr.MISMATCH), [])
+
+    def test_check_after_the_ended_bound_is_ordinary(self):
+        rec = base()
+        rec["timeline"]["restore_started"] = "not_observed"
+        rec["recovery_checks"][0]["at"] = "2026-12-04T09:01:00Z"
+        self.assertEqual(codes(check(rec)), [("timeline.restore_started", "not_observed")])
+
+
+class Yaml11Scalars(unittest.TestCase):
+    """A documented limit of the shared loader: unquoted YAML 1.1 scalars change type before checking."""
+
+    def test_coercions_are_documented_and_happen_before_checking(self):
+        schema = (HERE / "record-schema.md").read_text()
+        for text in ("`1:30` becomes 90", "`010` becomes 8", "`no`", "`true` or `false`"):
+            self.assertIn(text, schema)
+        raw = COMPLETE.read_bytes()
+        for needle, token, parsed in ((b"observed_extreme: 1.8", b"observed_extreme: 1:30", 90),
+                                      (b"observed_extreme: 1.8", b"observed_extreme: 010", 8),
+                                      (b"crossed: false", b"crossed: no", False)):
+            self.assertIn(needle, raw)
+            data = raw.replace(needle, token, 1)
+            key = needle.split(b":")[0].decode()
+            self.assertEqual(vp._load(data)["abort_criteria"][0][key], parsed)
+            self.assertEqual(check(data)["status"], vr.COMPLETE)
 
 
 if __name__ == "__main__":

@@ -277,14 +277,16 @@ def _check(plan: dict, plan_report: dict, record) -> tuple[list[dict], dict]:
                 if name in plan_roles:
                     c.gap(p, f"the plan declares a {name}; their sign-off is missing")
                 continue
+            # A sign-off for a role the plan does not declare is a mismatch, and its entry is
+            # still checked like any other: shape, fields, nulls and evidence gaps are all
+            # reported. Only the comparison with a plan reference is skipped, as there is none.
             if name not in plan_roles:
                 c.fail(p, "role_undeclared", f"the plan declares no {name}")
-                continue
             entry = c.section(signs, name, ("reference", "confirmed_how", "at"), p)
             if entry is None:
                 continue
             ref = c.ev_text(entry, "reference", f"{p}.reference")
-            if ref not in (None, NOT_OBSERVED) and _norm(ref) != plan_roles[name]:
+            if name in plan_roles and ref not in (None, NOT_OBSERVED) and _norm(ref) != plan_roles[name]:
                 c.fail(f"{p}.reference", "role_reference_mismatch", f"does not match the plan's {name} reference")
             c.ev_text(entry, "confirmed_how", f"{p}.confirmed_how")
             c.ev_time(entry, "at", f"{p}.at")
@@ -302,14 +304,24 @@ def _check(plan: dict, plan_report: dict, record) -> tuple[list[dict], dict]:
             if key in t and start and not start <= t[key] <= end:
                 c.fail(f"timeline.{key}", "outside_window", "must lie within the plan's window (UTC)")
         # Preconditions may be confirmed before the window opens, never after the links are cut.
-        order = [("preconditions_confirmed", "links_severed"), ("links_severed", "ended"),
-                 ("ended", "restore_started"), ("restore_started", "restore_finished")]
-        for first, second in order:
-            if first in t and second in t and t[first] > t[second]:
-                c.fail(f"timeline.{second}", "timeline_order", f"{second} is earlier than {first}")
+        # Each observed event is compared with the nearest earlier observed event, so an event
+        # that is not_observed, absent or malformed does not hide an out-of-order pair around
+        # it. Nothing is inferred for the skipped event.
+        prev = None
+        for key in TIMELINE_EVENTS:
+            if key not in t:
+                continue
+            if prev is not None and t[prev] > t[key]:
+                c.fail(f"timeline.{key}", "timeline_order", f"{key} is earlier than {prev}")
+            prev = key
         if "preconditions_confirmed" in t and end and t["preconditions_confirmed"] > end:
             c.fail("timeline.preconditions_confirmed", "outside_window", "is after the plan's window closed")
-        # Restoration may legitimately run past the window's end; it is measured, not judged.
+        # Restoration follows the drill, so it cannot precede the window; this holds even when
+        # the events between are not observed. It may legitimately run past the window's end;
+        # it is measured, not judged.
+        for key in ("restore_started", "restore_finished"):
+            if key in t and start and t[key] < start:
+                c.fail(f"timeline.{key}", "outside_window", "restoration cannot precede the plan's window (UTC)")
         limit = plan["restore"]["max_restore_minutes"]
         derived["plan_max_restore_minutes"] = limit
         if "restore_started" in t and "restore_finished" in t and t["restore_finished"] >= t["restore_started"]:
@@ -361,6 +373,18 @@ def _check(plan: dict, plan_report: dict, record) -> tuple[list[dict], dict]:
 
     # ---- recovery checks: plan role, that role's person, never the operator; after restore starts
     plan_checks = {e["id"]: e["checked_by_role"] for e in plan["recovery_checks"]}
+    # A check follows the restore. If the restore start was not observed, the latest observed
+    # earlier event bounds it instead, and with no observed drill event, the window's start.
+    # These are weaker bounds, not inferred times.
+    floor = None
+    for key, message in (("restore_started", "a recovery check cannot precede the restore (or the drill's end)"),
+                         ("ended", "a recovery check cannot precede the restore (or the drill's end)"),
+                         ("links_severed", "a recovery check cannot precede the drill's start (links_severed)")):
+        if key in t:
+            floor = (t[key], message)
+            break
+    if floor is None and start:
+        floor = (start, "a recovery check cannot precede the plan's window (UTC)")
     checks, expect_check = c.entries(top, "recovery_checks")
     for i, item in enumerate(checks):
         p = f"recovery_checks[{i}]"
@@ -382,9 +406,8 @@ def _check(plan: dict, plan_report: dict, record) -> tuple[list[dict], dict]:
                 c.fail(f"{p}.checked_by_reference", "check_not_independent", "the operator may not record a recovery check")
             elif role in plan_roles and _norm(ref) != plan_roles[role]:
                 c.fail(f"{p}.checked_by_reference", "role_reference_mismatch", f"does not match the plan's {role} reference")
-        floor = t.get("restore_started") or t.get("ended")
-        if when not in (None, NOT_OBSERVED) and floor and when < floor:
-            c.fail(f"{p}.at", "check_before_restore", "a recovery check cannot precede the restore (or the drill's end)")
+        if when not in (None, NOT_OBSERVED) and floor and when < floor[0]:
+            c.fail(f"{p}.at", "check_before_restore", floor[1])
     seen_check = _index(c, checks, "recovery_checks")
     for ident in sorted(set(seen_check) - set(plan_checks)):
         c.fail(f"recovery_checks[{seen_check[ident][0]}].id", "unknown_reference", f"the plan has no recovery check {ident!r}")
@@ -451,8 +474,11 @@ def _check(plan: dict, plan_report: dict, record) -> tuple[list[dict], dict]:
 
 def _reason(source, r):
     message = r["message"]
-    if source == "record" and message.startswith("plan "):
-        message = "record " + message[len("plan "):]  # shared loader messages say "plan"
+    if source == "record":  # shared loader and reader messages say "plan" or "plans"
+        for old, new in (("plans ", "records "), ("plan ", "record ")):
+            if message.startswith(old):
+                message = new + message[len(old):]
+                break
     return {"class": _class(r["code"]), "input": source, "path": r["path"] or "(file)", "code": r["code"], "message": message}
 
 
@@ -463,6 +489,10 @@ def _read(path):
         return None, {"path": "(file)", "code": exc.code, "message": exc.message}
     except OSError as exc:
         return None, {"path": "(file)", "code": "unreadable", "message": exc.__class__.__name__}
+
+
+def _sorted(reasons):
+    return sorted(reasons, key=lambda r: (PRECEDENCE.index(r["class"]), r["input"], r["path"], r["code"], r["message"]))
 
 
 def validate(plan_bytes: bytes, record_bytes: bytes, plan_name="<plan>", record_name="<record>") -> dict:
@@ -500,7 +530,7 @@ def validate(plan_bytes: bytes, record_bytes: bytes, plan_name="<plan>", record_
     except Exception as exc:  # last line of defence: a refusal, never a traceback
         reasons.append(_reason("record", {"path": "(file)", "code": "internal_error",
                                           "message": f"the checker could not check this input: {exc.__class__.__name__}"}))
-    report["reasons"] = sorted(reasons, key=lambda r: (PRECEDENCE.index(r["class"]), r["input"], r["path"], r["code"], r["message"]))
+    report["reasons"] = _sorted(reasons)
     present = {r["class"] for r in reasons}
     report["status"] = next((cls for cls in PRECEDENCE if cls in present), COMPLETE)
     if report["status"] == INVALID:
@@ -513,8 +543,14 @@ def validate_paths(plan_path, record_path) -> dict:
     record_bytes, record_err = _read(record_path)
     if plan_err or record_err:
         report = validate(plan_bytes or b"", record_bytes or b"", Path(plan_path).name, Path(record_path).name)
-        reasons = [_reason(src, err) for src, err in (("plan", plan_err), ("record", record_err)) if err]
-        report.update(status=INVALID, declared_outcome=None, reasons=reasons,
+        # An unreadable input was checked as empty bytes, so its reasons describe that
+        # placeholder, not the file: only its read error is reported. The readable input's
+        # reasons are genuine and are kept. (With an unreadable plan the record is only loaded,
+        # never checked against a plan, so its kept reasons come from its own bytes.)
+        unreadable = {src for src, err in (("plan", plan_err), ("record", record_err)) if err}
+        reasons = [r for r in report["reasons"] if r["input"] not in unreadable]
+        reasons += [_reason(src, err) for src, err in (("plan", plan_err), ("record", record_err)) if err]
+        report.update(status=INVALID, declared_outcome=None, reasons=_sorted(reasons),
                       derived={"restore_minutes": None, "plan_max_restore_minutes": None, "restore_exceeds_plan_max": None})
         for src, err in (("plan", plan_err), ("record", record_err)):
             if err:
