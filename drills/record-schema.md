@@ -24,13 +24,13 @@ Exit codes: 0 = `evidence_complete_not_judged`; 1 = `invalid`, `mismatch` or `in
 Fields are of two kinds:
 
 - **Structure:** `schema_version`, `record_id`, the whole `plan` block, `window`, and each entry's `id`. If one is absent, the record cannot be bound to a plan, so it is `invalid` (`missing`).
-- **Evidence:** everything else that the table marks required: the sections `sign_offs`, `timeline`, `preconditions`, `abort_criteria`, `recovery_checks`, `deviations`, `coverage_gaps` and `outcome`, and every field inside them. Absent evidence is a gap, not a schema error. The record is `incomplete` (`missing_evidence`). An empty list or mapping declares nothing, so it is a gap too, reported once per plan item.
+- **Evidence:** everything else that the table marks required: the sections `sign_offs`, `timeline`, `preconditions`, `abort_criteria`, `recovery_checks`, `deviations`, `coverage_gaps` and `outcome`, and every field inside them. Absent evidence is a gap, not a schema error. The record is `incomplete` (`missing_evidence`). An empty value of the kind a section expects declares nothing, so it is a gap too, reported once for each plan item or field it leaves out. That is `[]` for `preconditions`, `abort_criteria`, `recovery_checks`, `deviations` or `coverage_gaps`, and `{}` for `sign_offs`, a role under it, `timeline` or `outcome`. An empty value of the other kind has the wrong type and is `invalid`. That is `{}` where a list is expected (`list`, or `value` for `deviations` and `coverage_gaps`), and `[]` where a mapping is expected (`shape`).
 
 `not_observed` is a literal value. It means a person declares that this was not observed. Any evidence field, or a whole evidence section, may be `not_observed`. It always makes the record `incomplete`, it is never compared with the plan, and it is never replaced by a default. Only the exact lowercase literal counts. Other prose such as "Not observed" or "n/a" is ordinary text with no special meaning.
 
 A value of the wrong type, or outside a closed set of choices, is `invalid` whether or not it is evidence.
 
-An explicit null, which is what a blank YAML value such as `response:` becomes, is a supplied value of the wrong type: it is `invalid` in every typed field, evidence or structure, required or optional. Only an omitted key is absent evidence (`incomplete`). An empty list or mapping is a gap as above; a null section or entry is `invalid` (`shape` or `list`).
+An explicit null, which is what a blank YAML value such as `response:` becomes, is a supplied value of the wrong type: it is `invalid` in every typed field, evidence or structure, required or optional. Only an omitted key is absent evidence (`incomplete`). An empty value of the expected kind is a gap as above; a null section or entry is `invalid` (`shape`, `list`, or `value` for `deviations` and `coverage_gaps`).
 
 | Field | Required | Rule |
 |---|---|---|
@@ -50,7 +50,7 @@ An explicit null, which is what a blank YAML value such as `response:` becomes, 
 | `deviations` | yes | The word `none`, `not_observed`, or a non-empty list of `{description}`. |
 | `coverage_gaps` | yes | A non-empty list of text, `none_declared`, or `not_observed`. |
 | `outcome.declared` | yes | `completed_as_planned`, `aborted` or `not_run`. |
-| `outcome.abort_criterion_id` | only when `aborted` | The plan criterion that stopped the drill. |
+| `outcome.abort_criterion_id` | only when `aborted` | The plan criterion that stopped the drill. With `completed_as_planned` or `not_run` it is refused (`value`). When `declared` is absent, `not_observed` or not a valid choice, a supplied value is still evidence: text or `not_observed`, naming a plan criterion (`unknown_reference` otherwise). |
 
 All `reference` values are inert labels. They are never opened, fetched or resolved, even when they look like paths or URLs.
 

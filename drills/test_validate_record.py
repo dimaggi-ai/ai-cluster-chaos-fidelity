@@ -271,6 +271,33 @@ class Outcome(unittest.TestCase):
         self.assertEqual(codes(r), [("outcome.declared", "value")])
         self.assertIsNone(r["declared_outcome"])
 
+    def test_a_named_criterion_is_checked_without_a_usable_declaration(self):
+        # CTO review 6844793448 finding 1: with declared absent, not_observed or malformed, a
+        # supplied abort_criterion_id was never type-checked. It is evidence either way.
+        declarations = ((None, "missing_evidence"), ("not_observed", "not_observed"), ("passed", "value"))
+        named = ((None, "text"), (7, "text"), (["abort-error-rate"], "text"), ("", "text"), ("  ", "text"),
+                 ("not_observed", "not_observed"), ("abort-made-up", "unknown_reference"),
+                 ("abort-error-rate", None))  # recorded crossed: false, but only a declared abort is compared
+        for declared, declared_code in declarations:
+            for value, code in named:
+                rec = base()
+                rec["outcome"] = {"abort_criterion_id": value}
+                if declared is not None:
+                    rec["outcome"]["declared"] = declared
+                want = [("outcome.declared", declared_code)]
+                if code is not None:
+                    want.append(("outcome.abort_criterion_id", code))
+                self.assertEqual(codes(check(rec)), sorted(want), (declared, value))
+        rec = base()
+        rec["outcome"] = {"abort_criterion_id": None}
+        self.assertEqual(check(rec)["status"], vr.INVALID)
+        for declared in ("completed_as_planned", "not_run"):  # unchanged: only aborted names a criterion
+            rec = base()
+            rec["outcome"] = {"declared": declared, "abort_criterion_id": None}
+            if declared == "not_run":
+                rec["timeline"] = {k: "not_observed" for k in vr.TIMELINE_EVENTS}
+            self.assertIn(("outcome.abort_criterion_id", "value"), codes(check(rec)), declared)
+
     def test_deviations_and_coverage_need_an_explicit_declaration(self):
         for key, bad in (("deviations", ""), ("deviations", "None"), ("coverage_gaps", "none"), ("coverage_gaps", {})):
             rec = base()
@@ -354,6 +381,27 @@ class EvidenceAbsence(unittest.TestCase):
         rec = base()
         rec["sign_offs"] = {}
         self.assertEqual(check(rec)["status"], vr.INCOMPLETE)
+
+    def test_only_an_empty_value_of_the_expected_kind_is_a_gap(self):
+        # CTO review 6844793448 finding 2: record-schema.md pins which empty values are gaps.
+        for key, want in (("sign_offs", [(f"sign_offs.{n}", "missing_evidence") for n in ("approver", "operator", "verifier")]),
+                          ("timeline", [(f"timeline.{e}", "missing_evidence") for e in vr.TIMELINE_EVENTS]),
+                          ("outcome", [("outcome.declared", "missing_evidence")])):
+            rec = base()
+            rec[key] = {}
+            r = check(rec)
+            self.assertEqual((r["status"], codes(r)), (vr.INCOMPLETE, sorted(want)), key)
+        for key, empty, code in (("preconditions", {}, "list"), ("abort_criteria", {}, "list"),
+                                 ("recovery_checks", {}, "list"), ("deviations", {}, "value"),
+                                 ("coverage_gaps", {}, "value"), ("sign_offs", [], "shape"),
+                                 ("timeline", [], "shape"), ("outcome", [], "shape")):
+            rec = base()
+            rec[key] = empty
+            r = check(rec)
+            self.assertEqual((r["status"], codes(r)), (vr.INVALID, [(key, code)]), key)
+        rec = base()
+        rec["sign_offs"]["approver"] = []
+        self.assertEqual(codes(check(rec)), [("sign_offs.approver", "shape")])
 
     def test_structure_stays_invalid_when_absent(self):
         for path in (("schema_version",), ("record_id",), ("plan",), ("window",), ("plan", "plan_sha256"),

@@ -421,18 +421,22 @@ def _check(plan: dict, plan_report: dict, record) -> tuple[list[dict], dict]:
     out = c.section(top, "outcome", ("declared", "abort_criterion_id"))
     if out is not None:
         declared = c.ev_enum(out, "declared", "outcome.declared", OUTCOMES)
-        if declared == "aborted":
-            if "abort_criterion_id" not in out:
+        if declared in OUTCOMES and declared != "aborted":
+            if "abort_criterion_id" in out:
+                c.fail("outcome.abort_criterion_id", "value", "only an aborted outcome names an abort criterion")
+        elif "abort_criterion_id" not in out:
+            if declared == "aborted":
                 c.gap("outcome.abort_criterion_id", "an aborted drill names the criterion that stopped it")
-            else:
-                named = c.ev_text(out, "abort_criterion_id", "outcome.abort_criterion_id")
-                if named not in (None, NOT_OBSERVED):
-                    if named not in plan_abort:
-                        c.fail("outcome.abort_criterion_id", "unknown_reference", f"the plan has no abort criterion {named!r}")
-                    elif named in seen_abort and seen_abort[named][1].get("crossed") is False:
-                        c.fail("outcome.abort_criterion_id", "outcome_conflict", "the record says this criterion was not crossed")
-        elif declared in OUTCOMES and "abort_criterion_id" in out:
-            c.fail("outcome.abort_criterion_id", "value", "only an aborted outcome names an abort criterion")
+        else:
+            # Aborted, or no usable declaration (absent, not_observed or malformed). A supplied
+            # criterion is evidence either way: it must be text and name a plan criterion. Only
+            # a declared abort is compared with the criterion's crossed value.
+            named = c.ev_text(out, "abort_criterion_id", "outcome.abort_criterion_id")
+            if named not in (None, NOT_OBSERVED):
+                if named not in plan_abort:
+                    c.fail("outcome.abort_criterion_id", "unknown_reference", f"the plan has no abort criterion {named!r}")
+                elif declared == "aborted" and named in seen_abort and seen_abort[named][1].get("crossed") is False:
+                    c.fail("outcome.abort_criterion_id", "outcome_conflict", "the record says this criterion was not crossed")
         if declared == "not_run":
             for key in ("links_severed", "ended", "restore_started", "restore_finished"):
                 if key in t:
