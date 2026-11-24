@@ -1,0 +1,81 @@
+# Synthetic example. The drill was not run. Nothing was observed, and the record says so.
+# Status expected: incomplete. Missing observations are reported, never invented.
+schema_version: drill-record/v1
+record_id: vendor-severance-72h-example-record-4
+synthetic: true
+plan:
+  plan_id: vendor-severance-72h-example
+  plan_sha256: c299b94ce2326a174a1ab561ec57bc4fdc8a504e5e1ce531ee897f4ef76a8914
+  file_sha256: 5022bc45ba12ae1cc7e6afd5f6ca54730a383518b08feccb0412ddffbc3004cf
+  validator_status: plan_valid_not_run
+  validator_source_commit: 1b85c2e5e00a909989b7cfa81938c33e917a72c8
+window:
+  start: "2026-12-01T09:00:00Z"
+  end: "2026-12-04T09:00:00Z"
+sign_offs:
+  approver:
+    reference: approver@example.invalid
+    confirmed_how: Synthetic placeholder for how the approval was confirmed (ticket reference).
+    at: "2026-11-30T16:00:00Z"
+  operator:
+    reference: operator@example.invalid
+    confirmed_how: Synthetic placeholder for the operator's acknowledgement.
+    at: "2026-11-30T16:30:00Z"
+  verifier:
+    reference: verifier@example.invalid
+    confirmed_how: Synthetic placeholder for the verifier's acknowledgement.
+    at: "2026-11-30T17:00:00Z"
+timeline:
+  preconditions_confirmed: not_observed
+  links_severed: not_observed
+  ended: not_observed
+  restore_started: not_observed
+  restore_finished: not_observed
+preconditions:
+  - id: pre-backup
+    state: not_observed
+    reference: synthetic-ref-backup-1
+  - id: pre-staging-only
+    state: not_observed
+    reference: synthetic-ref-approval-1
+  - id: pre-rollback-rehearsed
+    state: not_observed
+abort_criteria:
+  - id: abort-error-rate
+    observed_extreme: not_observed
+    crossed: not_observed
+    response: Drill not run.
+  - id: abort-node-unready
+    observed_extreme: not_observed
+    crossed: not_observed
+    response: Drill not run.
+  - id: abort-cert-expiry
+    observed_extreme: not_observed
+    crossed: not_observed
+    response: Drill not run.
+recovery_checks:
+  - id: check-links-back
+    checked_by_role: verifier
+    checked_by_reference: verifier@example.invalid
+    state: not_observed
+    at: not_observed
+    reference: synthetic-ref-health-1
+  - id: check-workloads
+    checked_by_role: verifier
+    checked_by_reference: verifier@example.invalid
+    state: not_observed
+    at: not_observed
+    reference: synthetic-ref-dashboard-1
+  - id: check-signoff
+    checked_by_role: approver
+    checked_by_reference: approver@example.invalid
+    state: not_observed
+    at: not_observed
+    reference: synthetic-ref-review-1
+deviations: none
+coverage_gaps:
+  - The drill was not run, so nothing was tested.
+  - No customer workloads were present on staging, so tenant-facing effects were not observed.
+  - The licence check's grace period is longer than 72 hours, so its expiry was not reached.
+outcome:
+  declared: not_run
