@@ -53,7 +53,8 @@ all of it.
 `process-kill`, `cpu-sleep`, `networkchaos-overlay`, `chaosd-nic`,
 `ib-link-down`, `iochaos`, `stresschaos`, `gpu-burn`, `timechaos`, `dnschaos`,
 `httpchaos`, `artifact-swap`, `rag-degrade`, `agent-proposal`,
-`ocs-port-retune`, `circuit-disable`, `feeder-open`, `cdu-stop`, `pfs-degrade`.
+`ocs-port-retune`, `circuit-disable`, `feeder-open`, `cdu-stop`, `pfs-degrade`,
+`load-replay`.
 
 ## The four rules the linter enforces
 
@@ -78,6 +79,9 @@ all of it.
    experiment); and a parallel-filesystem stall requires `pfs-degrade` —
    **a PFS stall is not an ICI break**, and certifying it as one retires the
    wrong risk.
+   A load or traffic surge requires `load-replay` (generated demand against
+   healthy components): `httpchaos` delays the requests already there and
+   `pod-kill` removes capacity, so neither proves the shed path fires.
 
 4. **Layer map.** The technique must live on the layer the spec declares
    (`ib-link-down` on `fabric`, `feeder-open` on `facility`, …). Each fault
