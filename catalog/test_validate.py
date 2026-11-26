@@ -423,6 +423,15 @@ def test_manual_only_undo_is_a_demo():
         assert "does not prove the restore works" in errs[0], undo
 
 
+def test_manual_only_and_punctuation_only_undo_forms_are_refused():
+    """Compound manual-only forms, and values that fold to nothing, name no
+    automated restore path either."""
+    for undo in ("manual-only", "manual only", "Manual-Only.", "manual/operator",
+                 "manual, operator", "-", "--", "...", "   ", " . ; ", ","):
+        errs = validate_spec(_spec(undo=undo), "t")
+        assert errs and "undo must name the automated restore path" in errs[0], undo
+
+
 def test_undo_that_names_an_automated_step_passes():
     """Accepted undo text is a declaration, not restoration proof; a sentence
     naming an automated step passes even when it mentions manual checks. The
@@ -430,7 +439,9 @@ def test_undo_that_names_an_automated_step_passes():
     no step at all (e.g. 'a banana') is recorded as declared, not judged."""
     for undo in ("delete chaos resource", "a banana",
                  "automated port re-enable; manual verification of BER",
-                 "none needed if the deny holds; that is the point"):
+                 "none needed if the deny holds; that is the point",
+                 "automated rollback, manual only as fallback",
+                 "operator, the Kubernetes one, reconciles the resource"):
         assert validate_spec(_spec(undo=undo), "t") == [], undo
 
 
