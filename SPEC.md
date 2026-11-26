@@ -21,10 +21,10 @@ repurposing a field is a major-version change.
 | `injection.technique` | enum | how it is injected (see below) |
 | `injection.detail` | string | the concrete invocation (optional but expected) |
 | `blast_radius` | string | scope — one GPU / one rank / one replica first |
-| `duration` | string | a time cap carrying a number (e.g. `3m`) |
+| `duration` | string | one positive, finite time cap with a unit: `ms`, `s`, `m`, `h` or `d` (e.g. `3m`, `1.5h`). No maximum is enforced, and a passing duration does not authorize running the experiment |
 | `steady_state` | list | one or more contracts that must hold |
 | `abort` | string | the kill-switch condition |
-| `undo` | string | the automated restore path |
+| `undo` | string | the automated restore path. A manual-only or placeholder value (`manual`, `by hand`, `TBD`, `none`, `n/a`, …) is refused. The validator records the declaration; it does not prove the restore works |
 | `owner` | string | who runs it |
 | `evidence` | string | the metrics/log files that are ground truth |
 | `hardware_required` | bool | true if it needs real accelerators/fabric |
@@ -59,7 +59,11 @@ all of it.
 ## The four rules the linter enforces
 
 1. **Completeness (the demo rule).** A spec missing `owner`, `duration`,
-   `abort`, or `undo` is a demo, not an experiment, and is rejected.
+   `abort`, or `undo` is a demo, not an experiment, and is rejected. So is a
+   malformed, zero or unrepresentable `duration`, and an `undo` that is only a
+   manual or placeholder token (`manual`, `by hand`, `TBD`, `none`, `n/a`, …).
+   Any other `undo` text is recorded as declared; the validator does not judge
+   whether it names a working automated restore.
 
 2. **Fidelity.** If the `wanted_fault` and the `injection.technique` live on
    different layers, the spec is rejected with the reason. The rules encode the
