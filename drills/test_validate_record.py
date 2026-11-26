@@ -1166,5 +1166,126 @@ class Yaml11Scalars(unittest.TestCase):
             self.assertEqual(check(data)["status"], vr.COMPLETE)
 
 
+class SurvivingMutants(unittest.TestCase):
+    """Behaviour that one-line mutants of validate_record.py could change without a failing test
+    (verification of #123 at a60563f). Expected results come from record-schema.md and the
+    module docstring."""
+
+    run_cli = Cli.run_cli
+
+    def test_sha256_commit_with_every_hex_digit_is_accepted(self):
+        commit = "0123456789abcdef" * 4
+        rec = base()
+        rec["plan"]["validator_source_commit"] = commit
+        r = check(rec)
+        self.assertEqual(r["status"], vr.COMPLETE, codes(r))
+        self.assertEqual(r["plan"]["declared_validator_source_commit"], commit)
+
+    def test_notes_must_be_text_when_supplied(self):
+        for bad in (5, "", ["x"]):
+            with self.subTest(notes=bad):
+                rec = base()
+                rec["notes"] = bad
+                r = check(rec)
+                self.assertEqual(r["status"], vr.INVALID)
+                self.assertEqual(codes(r), [("notes", "text")])
+
+    def unobserved_drill(self, confirmed):
+        rec = base()
+        for key in ("links_severed", "ended", "restore_started", "restore_finished"):
+            rec["timeline"][key] = "not_observed"
+        rec["timeline"]["preconditions_confirmed"] = confirmed
+        return check(rec)
+
+    def test_preconditions_confirmed_after_the_window_is_outside_it(self):
+        r = self.unobserved_drill("2026-12-04T09:01:00Z")
+        self.assertEqual(r["status"], vr.MISMATCH)
+        self.assertEqual(codes(r, "mismatch"), [("timeline.preconditions_confirmed", "outside_window")])
+
+    def test_preconditions_confirmed_at_the_window_end_is_inside_it(self):
+        r = self.unobserved_drill("2026-12-04T09:00:00Z")
+        self.assertEqual(r["status"], vr.INCOMPLETE)
+        self.assertEqual(codes(r, "mismatch"), [])
+
+    def restore(self, finished):
+        rec = base()
+        self.assertEqual(rec["timeline"]["restore_started"], "2026-12-04T09:05:00Z")
+        rec["timeline"]["restore_finished"] = finished
+        return check(rec)
+
+    def test_restore_exactly_at_the_plan_limit_does_not_exceed_it(self):
+        r = self.restore("2026-12-04T10:05:00Z")
+        self.assertEqual(r["status"], vr.COMPLETE, codes(r))
+        self.assertEqual(r["derived"], {"restore_minutes": 60.0, "plan_max_restore_minutes": 60,
+                                        "restore_exceeds_plan_max": False})
+
+    def test_restore_over_the_plan_limit_is_reported_and_not_judged(self):
+        r = self.restore("2026-12-04T10:06:00Z")
+        self.assertEqual(r["status"], vr.COMPLETE, codes(r))
+        self.assertEqual(r["derived"]["restore_minutes"], 61.0)
+        self.assertIs(r["derived"]["restore_exceeds_plan_max"], True)
+
+    def test_zero_length_restore_is_measured(self):
+        r = self.restore("2026-12-04T09:05:00Z")
+        self.assertEqual(r["status"], vr.COMPLETE, codes(r))
+        self.assertEqual(r["derived"], {"restore_minutes": 0.0, "plan_max_restore_minutes": 60,
+                                        "restore_exceeds_plan_max": False})
+
+    def test_unknown_precondition_id_is_mismatch(self):
+        rec = base()
+        rec["preconditions"].append({"id": "pre-unknown", "state": "confirmed"})
+        index = len(rec["preconditions"]) - 1
+        r = check(rec)
+        self.assertEqual(r["status"], vr.MISMATCH)
+        self.assertEqual(codes(r), [(f"preconditions[{index}].id", "unknown_reference")])
+
+    def test_precondition_id_must_be_text(self):
+        rec = base()
+        rec["preconditions"][0]["id"] = 5
+        r = check(rec)
+        self.assertEqual(r["status"], vr.INVALID)
+        self.assertEqual(codes(r, "invalid"), [("preconditions[0].id", "text")])
+
+    def test_non_mapping_entries_are_invalid_shape(self):
+        for section in ("preconditions", "abort_criteria", "recovery_checks"):
+            for bad in ("text", ["x"], 5):
+                for position in (0, None):
+                    with self.subTest(section=section, bad=bad, position=position):
+                        rec = base()
+                        if position is None:
+                            rec[section].append(bad)
+                            index = len(rec[section]) - 1
+                        else:
+                            rec[section][position] = bad
+                            index = position
+                        r = check(rec)
+                        self.assertEqual(r["status"], vr.INVALID)
+                        self.assertEqual(codes(r, "invalid"), [(f"{section}[{index}]", "shape")])
+
+    def test_non_mapping_deviation_entry_is_invalid_shape(self):
+        for bad in ("text", None, 5):
+            with self.subTest(entry=bad):
+                rec = base()
+                rec["deviations"] = [bad]
+                r = check(rec)
+                self.assertEqual(r["status"], vr.INVALID)
+                self.assertEqual(codes(r), [("deviations[0]", "shape")])
+
+    def test_recovery_check_reference_must_match_the_plans_role_reference(self):
+        rec = base()
+        rec["recovery_checks"][0]["checked_by_reference"] = "approver@example.invalid"
+        r = check(rec)
+        self.assertEqual(r["status"], vr.MISMATCH)
+        self.assertEqual(codes(r), [("recovery_checks[0].checked_by_reference", "role_reference_mismatch")])
+
+    def test_wrong_argument_count_prints_the_usage_and_no_report(self):
+        for args in ((PLAN,), (), (PLAN, COMPLETE, COMPLETE)):
+            with self.subTest(args=args):
+                out = self.run_cli(*args)
+                self.assertEqual(out.returncode, 2)
+                self.assertIn("validate_record.py PLAN.yaml RECORD.yaml", out.stdout + out.stderr)
+                self.assertNotIn('"status"', out.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
